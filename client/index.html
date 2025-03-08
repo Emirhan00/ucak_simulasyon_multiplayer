@@ -1,0 +1,189 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>3D Multiplayer Uçak Simülasyonu</title>
+    <link rel="stylesheet" href="style.css">
+    <!-- Three.js CDN -->
+    <script src="https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.160.0/examples/js/controls/OrbitControls.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.160.0/examples/js/loaders/GLTFLoader.js"></script>
+    <!-- Cannon.js CDN -->
+    <script src="https://cdn.jsdelivr.net/npm/cannon@0.6.2/build/cannon.min.js"></script>
+    <!-- Socket.io CDN -->
+    <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
+    <!-- Stats.js CDN -->
+    <script src="https://mrdoob.github.io/stats.js/build/stats.min.js"></script>
+</head>
+<body>
+    <div id="game-container">
+        <canvas id="game-canvas"></canvas>
+        
+        <!-- UI Elements -->
+        <div id="ui-container">
+            <!-- Performance Stats -->
+            <div id="stats-container"></div>
+            
+            <!-- Player Info -->
+            <div id="player-info">
+                <div id="player-name"></div>
+                <div id="online-players">Online: <span id="player-count">0</span></div>
+                <div id="score">Score: <span id="player-score">0</span></div>
+            </div>
+            
+            <!-- Scoreboard - Sağ üste taşındı -->
+            <div id="scoreboard">
+                <h2>Scoreboard</h2>
+                <table id="score-table">
+                    <thead>
+                        <tr>
+                            <th>Player</th>
+                            <th>Score</th>
+                            <th>Kills</th>
+                            <th>Deaths</th>
+                        </tr>
+                    </thead>
+                    <tbody id="score-table-body"></tbody>
+                </table>
+            </div>
+            
+            <!-- Flight Data -->
+            <div id="flight-data">
+                <div>Altitude: <span id="altitude">0</span> m</div>
+                <div>Speed: <span id="speed">0</span> km/h</div>
+                <div>Vertical Speed: <span id="vertical-speed">0</span> m/s</div>
+            </div>
+            
+            <!-- Mission List -->
+            <div id="mission-container">
+                <h3>Missions</h3>
+                <ul id="mission-list"></ul>
+            </div>
+            
+            <!-- Ammo Counter -->
+            <div id="ammo-counter">
+                Ammo: <span id="current-ammo">100</span>/<span id="max-ammo">100</span>
+            </div>
+            
+            <!-- Mini Map / Radar -->
+            <div id="radar-container">
+                <canvas id="radar-canvas"></canvas>
+            </div>
+            
+            <!-- Hit Info -->
+            <div id="hit-info"></div>
+            
+            <!-- Feedback Button -->
+            <button id="feedback-btn">Ideas + Bugs</button>
+            
+            <!-- Chat Box -->
+            <div id="chat-container">
+                <div id="chat-messages"></div>
+                <div id="chat-input-container">
+                    <input type="text" id="chat-input" placeholder="Press Enter to chat...">
+                    <button id="chat-send">Send</button>
+                </div>
+            </div>
+        </div>
+        
+        <!-- Login Screen -->
+        <div id="login-screen" class="screen">
+            <div class="screen-content">
+                <h1>3D Multiplayer Uçak Simülasyonu</h1>
+                <div class="form-group">
+                    <label for="username">Username:</label>
+                    <input type="text" id="username" placeholder="Enter your username">
+                </div>
+                <button id="login-btn">Login</button>
+            </div>
+        </div>
+        
+        <!-- Lobby Screen -->
+        <div id="lobby-screen" class="screen hidden">
+            <div class="screen-content">
+                <h1>Game Lobby</h1>
+                <div class="lobby-section">
+                    <h2>Rooms</h2>
+                    <div id="room-list"></div>
+                    <button id="create-room-btn">Create Room</button>
+                    <button id="refresh-rooms-btn">Refresh</button>
+                </div>
+                <div class="lobby-section">
+                    <h2>Create Room</h2>
+                    <div class="form-group">
+                        <label for="room-name">Room Name:</label>
+                        <input type="text" id="room-name" placeholder="Enter room name">
+                    </div>
+                    <div class="form-group">
+                        <label for="room-password">Password (optional):</label>
+                        <input type="password" id="room-password" placeholder="Enter password">
+                    </div>
+                    <div class="form-group">
+                        <label for="max-players">Max Players:</label>
+                        <select id="max-players">
+                            <option value="2">2</option>
+                            <option value="4">4</option>
+                            <option value="6">6</option>
+                            <option value="8">8</option>
+                            <option value="10">10</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label for="game-mode">Game Mode:</label>
+                        <select id="game-mode">
+                            <option value="free-flight">Free Flight</option>
+                            <option value="team-deathmatch">Team Deathmatch</option>
+                            <option value="balloon-hunt">Balloon Hunt</option>
+                            <option value="capture-flag">Capture the Flag</option>
+                        </select>
+                    </div>
+                    <button id="create-room-submit">Create</button>
+                </div>
+            </div>
+        </div>
+        
+        <!-- Room Screen -->
+        <div id="room-screen" class="screen hidden">
+            <div class="screen-content">
+                <h1 id="room-title">Room Name</h1>
+                <div class="room-section">
+                    <h2>Players</h2>
+                    <div id="player-list"></div>
+                </div>
+                <div class="room-section">
+                    <h2>Settings</h2>
+                    <div id="room-settings"></div>
+                </div>
+                <div class="room-actions">
+                    <button id="ready-btn">Ready</button>
+                    <button id="leave-room-btn">Leave Room</button>
+                </div>
+            </div>
+        </div>
+        
+        <!-- Feedback Modal -->
+        <div id="feedback-modal" class="modal hidden">
+            <div class="modal-content">
+                <span class="close-modal">&times;</span>
+                <h2>Send Feedback</h2>
+                <div class="form-group">
+                    <label for="feedback-type">Type:</label>
+                    <select id="feedback-type">
+                        <option value="idea">Idea</option>
+                        <option value="bug">Bug</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label for="feedback-text">Description:</label>
+                    <textarea id="feedback-text" placeholder="Describe your idea or bug..."></textarea>
+                </div>
+                <button id="submit-feedback">Submit</button>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Game Scripts -->
+    <script type="module" src="main.js"></script>
+</body>
+</html> 

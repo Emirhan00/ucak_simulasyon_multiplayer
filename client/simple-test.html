@@ -1,0 +1,144 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Socket.io Test Sayfası</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+        #messages {
+            height: 300px;
+            border: 1px solid #ccc;
+            margin-bottom: 20px;
+            padding: 10px;
+            overflow-y: auto;
+            background-color: #f9f9f9;
+        }
+        .message {
+            margin-bottom: 10px;
+            padding: 8px;
+            border-radius: 5px;
+        }
+        .system {
+            background-color: #e6f7ff;
+            border-left: 3px solid #1890ff;
+        }
+        .user {
+            background-color: #f6ffed;
+            border-left: 3px solid #52c41a;
+        }
+        .other {
+            background-color: #fff7e6;
+            border-left: 3px solid #faad14;
+        }
+        input, button {
+            padding: 8px;
+            margin-right: 10px;
+        }
+        #messageInput {
+            width: 70%;
+        }
+        #status {
+            margin-bottom: 20px;
+            padding: 10px;
+            border-radius: 5px;
+            background-color: #f5f5f5;
+        }
+    </style>
+</head>
+<body>
+    <h1>Socket.io Test Sayfası</h1>
+    
+    <div id="status">Bağlantı durumu: <span id="connectionStatus">Bağlanıyor...</span></div>
+    
+    <div id="messages"></div>
+    
+    <div>
+        <input type="text" id="messageInput" placeholder="Mesajınızı yazın...">
+        <button id="sendButton">Gönder</button>
+    </div>
+
+    <!-- Socket.io istemci kütüphanesini CDN üzerinden yükle -->
+    <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
+    
+    <script>
+        // DOM elementlerini seç
+        const messagesDiv = document.getElementById('messages');
+        const messageInput = document.getElementById('messageInput');
+        const sendButton = document.getElementById('sendButton');
+        const connectionStatus = document.getElementById('connectionStatus');
+        
+        // Socket.io bağlantısını kur
+        const socket = io('http://localhost:3002');
+        
+        // Bağlantı durumu değişikliklerini izle
+        socket.on('connect', () => {
+            connectionStatus.textContent = 'Bağlandı';
+            connectionStatus.style.color = 'green';
+            addMessage('Sunucuya bağlandı.', 'system');
+        });
+        
+        socket.on('disconnect', () => {
+            connectionStatus.textContent = 'Bağlantı kesildi';
+            connectionStatus.style.color = 'red';
+            addMessage('Sunucu bağlantısı kesildi.', 'system');
+        });
+        
+        socket.on('connect_error', (error) => {
+            connectionStatus.textContent = 'Bağlantı hatası';
+            connectionStatus.style.color = 'red';
+            addMessage(`Bağlantı hatası: ${error.message}`, 'system');
+            console.error('Bağlantı hatası:', error);
+        });
+        
+        // Sunucudan gelen hoş geldin mesajını dinle
+        socket.on('welcome', (data) => {
+            addMessage(`Sunucu: ${data.message}`, 'system');
+        });
+        
+        // Sunucudan gelen yayın mesajlarını dinle
+        socket.on('broadcast', (data) => {
+            if (data.sender === socket.id) {
+                addMessage(`Sen: ${data.message}`, 'user');
+            } else {
+                addMessage(`${data.sender}: ${data.message}`, 'other');
+            }
+        });
+        
+        // Mesaj gönderme işlevi
+        function sendMessage() {
+            const message = messageInput.value.trim();
+            if (message) {
+                socket.emit('message', { message });
+                messageInput.value = '';
+            }
+        }
+        
+        // Mesaj eklemek için yardımcı işlev
+        function addMessage(text, type) {
+            const messageElement = document.createElement('div');
+            messageElement.classList.add('message', type);
+            messageElement.textContent = text;
+            messagesDiv.appendChild(messageElement);
+            messagesDiv.scrollTop = messagesDiv.scrollHeight;
+        }
+        
+        // Olay dinleyicileri
+        sendButton.addEventListener('click', sendMessage);
+        
+        messageInput.addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') {
+                sendMessage();
+            }
+        });
+        
+        // Sayfa yüklendiğinde
+        addMessage('Sayfa yüklendi, sunucuya bağlanıyor...', 'system');
+    </script>
+</body>
+</html> 

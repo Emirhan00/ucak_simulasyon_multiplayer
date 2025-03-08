@@ -1,0 +1,16 @@
+{
+  "version": 2,
+  "builds": [
+    { "src": "client/**/*", "use": "@vercel/static" },
+    { "src": "server/index.js", "use": "@vercel/node" }
+  ],
+  "routes": [
+    { "src": "/api/(.*)", "dest": "server/index.js" },
+    { "src": "/(.*)", "dest": "client/$1" }
+  ],
+  "env": {
+    "MONGODB_URI": "@mongodb-uri",
+    "SQLITE_DB_PATH": "./database.sqlite",
+    "PORT": "3000"
+  }
+} 

@@ -1,0 +1,196 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Debug Test</title>
+    <!-- Three.js CDN -->
+    <script src="https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.160.0/examples/js/controls/OrbitControls.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.160.0/examples/js/loaders/GLTFLoader.js"></script>
+    <!-- Cannon.js CDN -->
+    <script src="https://cdn.jsdelivr.net/npm/cannon@0.6.2/build/cannon.min.js"></script>
+    <!-- Socket.io CDN -->
+    <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
+    <!-- Stats.js CDN -->
+    <script src="https://mrdoob.github.io/stats.js/build/stats.min.js"></script>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 0;
+            padding: 20px;
+        }
+        #log {
+            border: 1px solid #ccc;
+            padding: 10px;
+            height: 400px;
+            overflow-y: auto;
+            margin-bottom: 10px;
+            font-family: monospace;
+            white-space: pre-wrap;
+        }
+        button {
+            padding: 10px;
+            margin-right: 10px;
+        }
+    </style>
+</head>
+<body>
+    <h1>Debug Test</h1>
+    <div id="log"></div>
+    <div>
+        <button id="test-world">Test World</button>
+        <button id="test-physics">Test Physics</button>
+        <button id="test-controls">Test Controls</button>
+        <button id="test-ui">Test UI</button>
+        <button id="test-effects">Test Effects</button>
+        <button id="test-network">Test Network</button>
+    </div>
+
+    <script type="module">
+        import { World } from './src/classes/World.js';
+        import { Physics } from './src/classes/Physics.js';
+        import { FlightControls } from './src/classes/FlightControls.js';
+        import { UI } from './src/classes/UI.js';
+        import { Effects } from './src/classes/Effects.js';
+        import { NetworkManager } from './src/network/NetworkManager.js';
+        import { GameConstants } from './src/constants/GameConstants.js';
+
+        const logElement = document.getElementById('log');
+        
+        // Orijinal console.log fonksiyonunu kaydet
+        const originalLog = console.log;
+        const originalError = console.error;
+        const originalWarn = console.warn;
+        
+        // console.log'u override et
+        console.log = function(...args) {
+            // Orijinal fonksiyonu çağır
+            originalLog.apply(console, args);
+            
+            // Log elementine ekle
+            const message = args.map(arg => {
+                if (typeof arg === 'object') {
+                    return JSON.stringify(arg, null, 2);
+                } else {
+                    return String(arg);
+                }
+            }).join(' ');
+            
+            logElement.innerHTML += `<span style="color: black;">[LOG] ${message}</span>\n`;
+            logElement.scrollTop = logElement.scrollHeight;
+        };
+        
+        // console.error'u override et
+        console.error = function(...args) {
+            // Orijinal fonksiyonu çağır
+            originalError.apply(console, args);
+            
+            // Log elementine ekle
+            const message = args.map(arg => {
+                if (typeof arg === 'object') {
+                    return JSON.stringify(arg, null, 2);
+                } else {
+                    return String(arg);
+                }
+            }).join(' ');
+            
+            logElement.innerHTML += `<span style="color: red;">[ERROR] ${message}</span>\n`;
+            logElement.scrollTop = logElement.scrollHeight;
+        };
+        
+        // console.warn'u override et
+        console.warn = function(...args) {
+            // Orijinal fonksiyonu çağır
+            originalWarn.apply(console, args);
+            
+            // Log elementine ekle
+            const message = args.map(arg => {
+                if (typeof arg === 'object') {
+                    return JSON.stringify(arg, null, 2);
+                } else {
+                    return String(arg);
+                }
+            }).join(' ');
+            
+            logElement.innerHTML += `<span style="color: orange;">[WARN] ${message}</span>\n`;
+            logElement.scrollTop = logElement.scrollHeight;
+        };
+        
+        // Three.js scene oluştur
+        const scene = new THREE.Scene();
+        
+        // Test fonksiyonları
+        document.getElementById('test-world').addEventListener('click', () => {
+            logElement.innerHTML += '<span style="color: blue;">--- Testing World ---</span>\n';
+            try {
+                const world = new World(scene);
+                world.create();
+                console.log('World test successful');
+            } catch (error) {
+                console.error('World test failed:', error);
+            }
+        });
+        
+        document.getElementById('test-physics').addEventListener('click', () => {
+            logElement.innerHTML += '<span style="color: blue;">--- Testing Physics ---</span>\n';
+            try {
+                const physics = new Physics();
+                physics.init();
+                console.log('Physics test successful');
+            } catch (error) {
+                console.error('Physics test failed:', error);
+            }
+        });
+        
+        document.getElementById('test-controls').addEventListener('click', () => {
+            logElement.innerHTML += '<span style="color: blue;">--- Testing FlightControls ---</span>\n';
+            try {
+                const controls = new FlightControls();
+                controls.init();
+                console.log('FlightControls test successful');
+            } catch (error) {
+                console.error('FlightControls test failed:', error);
+            }
+        });
+        
+        document.getElementById('test-ui').addEventListener('click', () => {
+            logElement.innerHTML += '<span style="color: blue;">--- Testing UI ---</span>\n';
+            try {
+                const ui = new UI();
+                ui.init();
+                console.log('UI test successful');
+            } catch (error) {
+                console.error('UI test failed:', error);
+            }
+        });
+        
+        document.getElementById('test-effects').addEventListener('click', () => {
+            logElement.innerHTML += '<span style="color: blue;">--- Testing Effects ---</span>\n';
+            try {
+                const effects = new Effects(scene);
+                effects.init();
+                console.log('Effects test successful');
+            } catch (error) {
+                console.error('Effects test failed:', error);
+            }
+        });
+        
+        document.getElementById('test-network').addEventListener('click', () => {
+            logElement.innerHTML += '<span style="color: blue;">--- Testing NetworkManager ---</span>\n';
+            try {
+                const networkManager = new NetworkManager();
+                networkManager.init({
+                    onConnect: () => console.log('Connected'),
+                    onDisconnect: () => console.log('Disconnected')
+                });
+                console.log('NetworkManager test successful');
+            } catch (error) {
+                console.error('NetworkManager test failed:', error);
+            }
+        });
+        
+        console.log('Debug test page loaded');
+    </script>
+</body>
+</html> 

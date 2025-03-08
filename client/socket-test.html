@@ -1,0 +1,119 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Socket.io Test</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+        #messages {
+            border: 1px solid #ccc;
+            padding: 10px;
+            height: 300px;
+            overflow-y: auto;
+            margin-bottom: 10px;
+        }
+        .message {
+            margin-bottom: 5px;
+            padding: 5px;
+            border-bottom: 1px solid #eee;
+        }
+        .system {
+            color: blue;
+        }
+        .error {
+            color: red;
+        }
+        .success {
+            color: green;
+        }
+        input, button {
+            padding: 8px;
+            margin-right: 5px;
+        }
+    </style>
+</head>
+<body>
+    <h1>Socket.io Test</h1>
+    
+    <div id="login-form">
+        <h2>Login</h2>
+        <input type="text" id="username" placeholder="Enter username">
+        <button id="login-btn">Login</button>
+    </div>
+    
+    <h2>Messages</h2>
+    <div id="messages"></div>
+    
+    <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
+    <script>
+        // DOM elementleri
+        const messagesDiv = document.getElementById('messages');
+        const usernameInput = document.getElementById('username');
+        const loginBtn = document.getElementById('login-btn');
+        
+        // Mesaj ekleme fonksiyonu
+        function addMessage(text, type = '') {
+            const messageDiv = document.createElement('div');
+            messageDiv.className = `message ${type}`;
+            messageDiv.textContent = text;
+            messagesDiv.appendChild(messageDiv);
+            messagesDiv.scrollTop = messagesDiv.scrollHeight;
+        }
+        
+        // Socket.io bağlantısı
+        addMessage('Connecting to server...', 'system');
+        
+        // Doğrudan URL belirterek bağlan
+        const socket = io('http://localhost:3001', {
+            transports: ['websocket', 'polling'],
+            reconnection: true,
+            reconnectionAttempts: 5
+        });
+        
+        // Bağlantı olayları
+        socket.on('connect', () => {
+            addMessage('Connected to server!', 'success');
+        });
+        
+        socket.on('connect_error', (error) => {
+            addMessage(`Connection error: ${error}`, 'error');
+        });
+        
+        socket.on('disconnect', (reason) => {
+            addMessage(`Disconnected: ${reason}`, 'system');
+        });
+        
+        // Test mesajı
+        socket.on('test', (data) => {
+            addMessage(`Test message: ${data.message}`, 'success');
+        });
+        
+        // Login başarılı
+        socket.on('login_success', (data) => {
+            addMessage(`Login successful: ${JSON.stringify(data)}`, 'success');
+        });
+        
+        // Login hatası
+        socket.on('login_error', (data) => {
+            addMessage(`Login error: ${JSON.stringify(data)}`, 'error');
+        });
+        
+        // Login butonu
+        loginBtn.addEventListener('click', () => {
+            const username = usernameInput.value.trim();
+            if (username) {
+                addMessage(`Attempting to login as: ${username}`, 'system');
+                socket.emit('player:login', { username });
+            } else {
+                addMessage('Please enter a username', 'error');
+            }
+        });
+    </script>
+</body>
+</html> 

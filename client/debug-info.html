@@ -1,0 +1,345 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Debug Info</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 0;
+            padding: 20px;
+            background-color: #f5f5f5;
+        }
+        h1 {
+            color: #333;
+            border-bottom: 1px solid #ccc;
+            padding-bottom: 10px;
+        }
+        .section {
+            background-color: white;
+            border-radius: 5px;
+            padding: 15px;
+            margin-bottom: 20px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        .section h2 {
+            margin-top: 0;
+            color: #444;
+        }
+        pre {
+            background-color: #f9f9f9;
+            border: 1px solid #ddd;
+            border-radius: 3px;
+            padding: 10px;
+            overflow-x: auto;
+        }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+        table, th, td {
+            border: 1px solid #ddd;
+        }
+        th, td {
+            padding: 8px;
+            text-align: left;
+        }
+        th {
+            background-color: #f2f2f2;
+        }
+        .error {
+            color: red;
+        }
+        .success {
+            color: green;
+        }
+        .warning {
+            color: orange;
+        }
+        button {
+            padding: 8px 15px;
+            background-color: #4CAF50;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            margin-right: 10px;
+            margin-bottom: 10px;
+        }
+        button:hover {
+            background-color: #45a049;
+        }
+    </style>
+</head>
+<body>
+    <h1>Debug Information</h1>
+    
+    <div class="section">
+        <h2>Browser Information</h2>
+        <div id="browser-info"></div>
+    </div>
+    
+    <div class="section">
+        <h2>Libraries Status</h2>
+        <div id="libraries-status"></div>
+    </div>
+    
+    <div class="section">
+        <h2>Game Components</h2>
+        <div id="game-components"></div>
+    </div>
+    
+    <div class="section">
+        <h2>Test Components</h2>
+        <button id="test-three">Test Three.js</button>
+        <button id="test-cannon">Test Cannon.js</button>
+        <button id="test-socketio">Test Socket.io</button>
+        <button id="test-stats">Test Stats.js</button>
+        <div id="test-results"></div>
+    </div>
+    
+    <div class="section">
+        <h2>Console Log</h2>
+        <div>
+            <button id="clear-log">Clear Log</button>
+            <button id="export-log">Export Log</button>
+        </div>
+        <pre id="console-log"></pre>
+    </div>
+    
+    <script>
+        // Browser bilgilerini göster
+        function showBrowserInfo() {
+            const browserInfoDiv = document.getElementById('browser-info');
+            const info = {
+                'User Agent': navigator.userAgent,
+                'Platform': navigator.platform,
+                'Language': navigator.language,
+                'Screen Resolution': `${window.screen.width}x${window.screen.height}`,
+                'Window Size': `${window.innerWidth}x${window.innerHeight}`,
+                'Device Pixel Ratio': window.devicePixelRatio
+            };
+            
+            const table = document.createElement('table');
+            for (const [key, value] of Object.entries(info)) {
+                const row = table.insertRow();
+                const cell1 = row.insertCell(0);
+                const cell2 = row.insertCell(1);
+                cell1.textContent = key;
+                cell2.textContent = value;
+            }
+            
+            browserInfoDiv.appendChild(table);
+        }
+        
+        // Kütüphane durumlarını göster
+        function showLibrariesStatus() {
+            const librariesStatusDiv = document.getElementById('libraries-status');
+            const libraries = {
+                'THREE.js': typeof THREE !== 'undefined',
+                'CANNON.js': typeof CANNON !== 'undefined',
+                'Socket.io': typeof io !== 'undefined',
+                'Stats.js': typeof Stats !== 'undefined'
+            };
+            
+            const table = document.createElement('table');
+            for (const [library, loaded] of Object.entries(libraries)) {
+                const row = table.insertRow();
+                const cell1 = row.insertCell(0);
+                const cell2 = row.insertCell(1);
+                cell1.textContent = library;
+                cell2.textContent = loaded ? 'Loaded' : 'Not Loaded';
+                cell2.className = loaded ? 'success' : 'error';
+            }
+            
+            librariesStatusDiv.appendChild(table);
+        }
+        
+        // Oyun bileşenlerini göster
+        function showGameComponents() {
+            const gameComponentsDiv = document.getElementById('game-components');
+            
+            // Oyun bileşenlerini kontrol et
+            const components = {
+                'scene': window.scene !== undefined,
+                'camera': window.camera !== undefined,
+                'renderer': window.renderer !== undefined,
+                'world': window.world !== undefined,
+                'physics': window.physics !== undefined,
+                'controls': window.controls !== undefined,
+                'ui': window.ui !== undefined,
+                'mission': window.mission !== undefined,
+                'effects': window.effects !== undefined,
+                'networkManager': window.networkManager !== undefined
+            };
+            
+            const table = document.createElement('table');
+            for (const [component, exists] of Object.entries(components)) {
+                const row = table.insertRow();
+                const cell1 = row.insertCell(0);
+                const cell2 = row.insertCell(1);
+                cell1.textContent = component;
+                cell2.textContent = exists ? 'Initialized' : 'Not Initialized';
+                cell2.className = exists ? 'success' : 'error';
+            }
+            
+            gameComponentsDiv.appendChild(table);
+        }
+        
+        // Konsol logunu override et
+        const consoleLogDiv = document.getElementById('console-log');
+        const originalConsoleLog = console.log;
+        const originalConsoleError = console.error;
+        const originalConsoleWarn = console.warn;
+        
+        console.log = function(...args) {
+            originalConsoleLog.apply(console, args);
+            const message = args.map(arg => {
+                if (typeof arg === 'object') {
+                    return JSON.stringify(arg, null, 2);
+                } else {
+                    return String(arg);
+                }
+            }).join(' ');
+            consoleLogDiv.textContent += `[LOG] ${message}\n`;
+        };
+        
+        console.error = function(...args) {
+            originalConsoleError.apply(console, args);
+            const message = args.map(arg => {
+                if (typeof arg === 'object') {
+                    return JSON.stringify(arg, null, 2);
+                } else {
+                    return String(arg);
+                }
+            }).join(' ');
+            consoleLogDiv.textContent += `[ERROR] ${message}\n`;
+        };
+        
+        console.warn = function(...args) {
+            originalConsoleWarn.apply(console, args);
+            const message = args.map(arg => {
+                if (typeof arg === 'object') {
+                    return JSON.stringify(arg, null, 2);
+                } else {
+                    return String(arg);
+                }
+            }).join(' ');
+            consoleLogDiv.textContent += `[WARN] ${message}\n`;
+        };
+        
+        // Test fonksiyonları
+        document.getElementById('test-three').addEventListener('click', function() {
+            const resultsDiv = document.getElementById('test-results');
+            try {
+                if (typeof THREE === 'undefined') {
+                    throw new Error('THREE is not defined');
+                }
+                
+                // Basit bir Three.js testi
+                const scene = new THREE.Scene();
+                const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+                const geometry = new THREE.BoxGeometry(1, 1, 1);
+                const material = new THREE.MeshBasicMaterial({ color: 0x00ff00 });
+                const cube = new THREE.Mesh(geometry, material);
+                scene.add(cube);
+                
+                resultsDiv.innerHTML += '<p class="success">Three.js test successful</p>';
+            } catch (error) {
+                resultsDiv.innerHTML += `<p class="error">Three.js test failed: ${error.message}</p>`;
+                console.error('Three.js test failed:', error);
+            }
+        });
+        
+        document.getElementById('test-cannon').addEventListener('click', function() {
+            const resultsDiv = document.getElementById('test-results');
+            try {
+                if (typeof CANNON === 'undefined') {
+                    throw new Error('CANNON is not defined');
+                }
+                
+                // Basit bir Cannon.js testi
+                const world = new CANNON.World();
+                world.gravity.set(0, -9.82, 0);
+                const shape = new CANNON.Box(new CANNON.Vec3(1, 1, 1));
+                const body = new CANNON.Body({ mass: 1 });
+                body.addShape(shape);
+                world.addBody(body);
+                
+                resultsDiv.innerHTML += '<p class="success">Cannon.js test successful</p>';
+            } catch (error) {
+                resultsDiv.innerHTML += `<p class="error">Cannon.js test failed: ${error.message}</p>`;
+                console.error('Cannon.js test failed:', error);
+            }
+        });
+        
+        document.getElementById('test-socketio').addEventListener('click', function() {
+            const resultsDiv = document.getElementById('test-results');
+            try {
+                if (typeof io === 'undefined') {
+                    throw new Error('Socket.io is not defined');
+                }
+                
+                // Socket.io varlığını kontrol et
+                resultsDiv.innerHTML += '<p class="success">Socket.io is available</p>';
+            } catch (error) {
+                resultsDiv.innerHTML += `<p class="error">Socket.io test failed: ${error.message}</p>`;
+                console.error('Socket.io test failed:', error);
+            }
+        });
+        
+        document.getElementById('test-stats').addEventListener('click', function() {
+            const resultsDiv = document.getElementById('test-results');
+            try {
+                if (typeof Stats === 'undefined') {
+                    throw new Error('Stats.js is not defined');
+                }
+                
+                // Basit bir Stats.js testi
+                const stats = new Stats();
+                stats.showPanel(0);
+                
+                resultsDiv.innerHTML += '<p class="success">Stats.js test successful</p>';
+            } catch (error) {
+                resultsDiv.innerHTML += `<p class="error">Stats.js test failed: ${error.message}</p>`;
+                console.error('Stats.js test failed:', error);
+            }
+        });
+        
+        // Log temizleme
+        document.getElementById('clear-log').addEventListener('click', function() {
+            consoleLogDiv.textContent = '';
+        });
+        
+        // Log dışa aktarma
+        document.getElementById('export-log').addEventListener('click', function() {
+            const log = consoleLogDiv.textContent;
+            const blob = new Blob([log], { type: 'text/plain' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = 'debug-log.txt';
+            a.click();
+            URL.revokeObjectURL(url);
+        });
+        
+        // Sayfa yüklendiğinde bilgileri göster
+        window.addEventListener('load', function() {
+            showBrowserInfo();
+            showLibrariesStatus();
+            
+            // Oyun bileşenlerini göstermek için biraz bekle
+            setTimeout(showGameComponents, 1000);
+            
+            console.log('Debug info page loaded');
+        });
+    </script>
+    
+    <!-- Gerekli kütüphaneleri yükle -->
+    <script src="https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/cannon@0.6.2/build/cannon.min.js"></script>
+    <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
+    <script src="https://mrdoob.github.io/stats.js/build/stats.min.js"></script>
+</body>
+</html> 

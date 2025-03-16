@@ -667,7 +667,11 @@ export class Aircraft {
         try {
             // Basitleştirilmiş aerodinamik model
             
-            // 1. Sürüklenme (Drag) - Hıza ters yönde etki eder
+            // 1. Yerçekimi kuvveti - Daha gerçekçi bir yerçekimi etkisi
+            const gravityForce = new CANNON.Vec3(0, -9.81 * this.body.mass, 0);
+            this.body.applyForce(gravityForce, new CANNON.Vec3(0, 0, 0));
+            
+            // 2. Sürüklenme (Drag) - Hıza ters yönde etki eder
             const velocity = this.body.velocity;
             const speed = this.speed;
             
@@ -710,14 +714,77 @@ export class Aircraft {
             // Kuvveti uygula
             this.body.applyForce(dragVector, new CANNON.Vec3(0, 0, 0));
             
-            // 2. Stabilizasyon - Uçağın dengede kalmasını sağlar
+            // 3. Kaldırma Kuvveti (Lift) - Hıza bağlı olarak yukarı yönde etki eder
+            // Kaldırma kuvveti, hızın karesiyle orantılıdır
+            const liftCoefficient = 0.03; // Kaldırma katsayısı
+            const liftForce = liftCoefficient * speed * speed;
             
-            // Yatay stabilizasyon (roll)
             // Uçağın yukarı vektörü
             const upDir = new CANNON.Vec3(0, 1, 0);
             const worldUp = new CANNON.Vec3();
             this.body.quaternion.vmult(upDir, worldUp);
             
+            // Kaldırma kuvvetini uygula (uçağın yukarı yönünde)
+            const liftVector = new CANNON.Vec3(
+                worldUp.x * liftForce,
+                worldUp.y * liftForce,
+                worldUp.z * liftForce
+            );
+            
+            // Kuvveti uygula
+            this.body.applyForce(liftVector, new CANNON.Vec3(0, 0, 0));
+            
+            // 4. İtme Kuvveti (Thrust) - Motor gücüne bağlı olarak ileri yönde etki eder
+            // İtme kuvveti, throttle değeriyle orantılıdır
+            const maxThrust = 100; // Maksimum itme kuvveti
+            const thrustForce = maxThrust * this.throttle;
+            
+            // Uçağın ileri vektörü
+            const forwardDir = new CANNON.Vec3(0, 0, 1);
+            const worldForward = new CANNON.Vec3();
+            this.body.quaternion.vmult(forwardDir, worldForward);
+            
+            // İtme kuvvetini uygula (uçağın ileri yönünde)
+            const thrustVector = new CANNON.Vec3(
+                worldForward.x * thrustForce,
+                worldForward.y * thrustForce,
+                worldForward.z * thrustForce
+            );
+            
+            // Kuvveti uygula
+            this.body.applyForce(thrustVector, new CANNON.Vec3(0, 0, 0));
+            
+            // 5. Kontrol Yüzeyleri - Kullanıcı girdilerine bağlı olarak tork uygula
+            
+            // Pitch kontrolü (elevator)
+            const pitchTorque = new CANNON.Vec3(
+                inputs.pitch * 20 * speed, // Hızla orantılı
+                0,
+                0
+            );
+            
+            // Roll kontrolü (ailerons)
+            const rollTorque = new CANNON.Vec3(
+                0,
+                0,
+                inputs.roll * 15 * speed // Hızla orantılı
+            );
+            
+            // Yaw kontrolü (rudder)
+            const yawTorque = new CANNON.Vec3(
+                0,
+                inputs.yaw * 10 * speed, // Hızla orantılı
+                0
+            );
+            
+            // Torkları uygula
+            this.body.applyTorque(pitchTorque);
+            this.body.applyTorque(rollTorque);
+            this.body.applyTorque(yawTorque);
+            
+            // 6. Stabilizasyon - Uçağın dengede kalmasını sağlar
+            
+            // Yatay stabilizasyon (roll)
             // Dünya yukarı vektörü ile uçağın yukarı vektörü arasındaki açı
             const dotProduct = worldUp.dot(new CANNON.Vec3(0, 1, 0));
             const angle = Math.acos(Math.max(-1, Math.min(1, dotProduct)));
@@ -746,14 +813,9 @@ export class Aircraft {
                 this.body.applyTorque(stabilizationTorque);
             }
             
-            // 3. Stall Durumu - Çok yüksek hücum açısında kaldırma kuvveti kaybı
+            // 7. Stall Durumu - Çok yüksek hücum açısında kaldırma kuvveti kaybı
             
             // Uçağın ileri vektörü
-            const forwardDir = new CANNON.Vec3(0, 0, 1);
-            const worldForward = new CANNON.Vec3();
-            this.body.quaternion.vmult(forwardDir, worldForward);
-            
-            // Hücum açısını hesapla (uçağın ileri yönü ile yatay düzlem arasındaki açı)
             const horizontalDir = new CANNON.Vec3(worldForward.x, 0, worldForward.z);
             horizontalDir.normalize();
             
@@ -791,77 +853,22 @@ export class Aircraft {
                 }
             }
             
-            // 4. Yer Etkisi (Ground Effect) - Yere yakın uçarken kaldırma kuvveti artar
+            // 8. Yer Etkisi (Ground Effect) - Yere yakın uçarken kaldırma kuvveti artar
             
             // Yerden yükseklik
             const altitude = this.body.position.y;
             const wingSpan = 10; // Kanat açıklığı (m)
             
             // Yer etkisi faktörü (yükseklik kanat açıklığının yarısından azsa etki başlar)
-            if (altitude < wingSpan / 2 && !this.isOnGround) {
-                const groundEffectFactor = 1.0 - (altitude / (wingSpan / 2)); // 0-1 arası
+            if (altitude < wingSpan / 2 && speed > 10) {
+                const groundEffectFactor = 1.0 - (altitude / (wingSpan / 2));
+                const groundEffectForce = groundEffectFactor * 10 * speed;
                 
-                // Ek kaldırma kuvveti
-                const liftBoost = groundEffectFactor * 10.0 * speed;
-                const groundEffectForce = new CANNON.Vec3(0, liftBoost, 0);
-                this.body.applyForce(groundEffectForce, new CANNON.Vec3(0, 0, 0));
+                // Yer etkisi kuvvetini uygula (yukarı yönde)
+                const groundEffectVector = new CANNON.Vec3(0, groundEffectForce, 0);
+                this.body.applyForce(groundEffectVector, new CANNON.Vec3(0, 0, 0));
             }
             
-            // 5. Kalkış ve İniş Modları
-            
-            // Kalkış modu - Daha fazla kaldırma kuvveti ve stabilite
-            if (this.isTakingOff && !this.isOnGround) {
-                // Kalkış sırasında ekstra kaldırma kuvveti
-                const takeoffLiftForce = new CANNON.Vec3(0, 15.0 * speed, 0);
-                this.body.applyForce(takeoffLiftForce, new CANNON.Vec3(0, 0, 0));
-                
-                // Kalkış sırasında daha fazla stabilite
-                this.body.angularDamping = 0.3;
-                
-                // Kalkış tamamlandıysa (belirli bir yüksekliğe ulaşıldıysa)
-                if (altitude > 50) {
-                    this.isTakingOff = false;
-                    console.log('Takeoff completed');
-                    
-                    if (this.effects && this.effects.showMessage) {
-                        this.effects.showMessage('Kalkış tamamlandı!', 'success');
-                    }
-                }
-            }
-            
-            // İniş modu - Daha fazla sürüklenme ve stabilite
-            if (this.isLanding) {
-                // İniş sırasında ekstra sürüklenme
-                const landingDragForce = new CANNON.Vec3(
-                    -velocityDir.x * dragForce * 0.5,
-                    -velocityDir.y * dragForce * 0.2, // Dikey sürüklenmeyi daha az artır
-                    -velocityDir.z * dragForce * 0.5
-                );
-                this.body.applyForce(landingDragForce, new CANNON.Vec3(0, 0, 0));
-                
-                // İniş sırasında daha fazla stabilite
-                this.body.angularDamping = 0.4;
-                
-                // Piste yaklaşırken hafif aşağı yönlendirme
-                if (altitude > 10 && !this.isOnRunway()) {
-                    const approachForce = new CANNON.Vec3(0, -5.0, 0);
-                    this.body.applyForce(approachForce, new CANNON.Vec3(0, 0, 0));
-                }
-                
-                // İniş tamamlandıysa (yere değdiyse)
-                if (this.isOnGround) {
-                    this.isLanding = false;
-                    console.log('Landing completed');
-                    
-                    if (this.effects && this.effects.showMessage) {
-                        this.effects.showMessage('İniş başarılı!', 'success');
-                    }
-                    
-                    if (this.effects && this.effects.playLandingSound) {
-                        this.effects.playLandingSound();
-                    }
-                }
-            }
         } catch (error) {
             console.error('Error in applyAerodynamics:', error);
         }

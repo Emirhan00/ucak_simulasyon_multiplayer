@@ -10,7 +10,7 @@ export class FlightControls {
         this.pitch = 0;        // -1 (aşağı) ile 1 (yukarı) arası
         this.roll = 0;         // -1 (sola yat) ile 1 (sağa yat) arası
         this.yaw = 0;          // -1 (sola dön) ile 1 (sağa dön) arası
-        this.throttle = 0;     // 0 ile 1 arası
+        this.throttle = 0.3;   // 0 ile 1 arası - başlangıç değeri 0.3 (sabit hız)
         this.brake = false;
         this.boost = false;
         this.fire = false;
@@ -181,12 +181,12 @@ export class FlightControls {
             // Basitleştirilmiş mod - WASD
             if (this.forward) {
                 this.pitch = -0.5;  // Burun yukarı
-                this.throttle += 0.01;  // Hafifçe hızlan
+                // Gaz değişimini kaldırdık, sadece pitch kontrolü
             }
             
             if (this.backward) {
                 this.pitch = 0.5;   // Burun aşağı
-                this.throttle -= 0.01;  // Hafifçe yavaşla
+                // Gaz değişimini kaldırdık, sadece pitch kontrolü
             }
             
             if (this.left) {
@@ -199,13 +199,13 @@ export class FlightControls {
                 this.yaw = 0.5;     // Sağa dönme
             }
             
-            // Gaz için yukarı/aşağı ok tuşları
+            // Gaz için yukarı/aşağı ok tuşları - daha hassas kontrol
             if (this.keyStates['ArrowUp']) {
-                this.throttle += 0.02;
+                this.throttle += 0.01;  // Daha yavaş artış
             }
             
             if (this.keyStates['ArrowDown']) {
-                this.throttle -= 0.02;
+                this.throttle -= 0.01;  // Daha yavaş azalış
             }
         } else {
             // Gerçekçi mod - orijinal kontroller

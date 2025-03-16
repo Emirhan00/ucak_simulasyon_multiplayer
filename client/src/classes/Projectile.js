@@ -42,6 +42,9 @@ export class Projectile {
         // Mermi mesh'i
         this.mesh = null;
         
+        // Mermi özellikleri
+        this.options = options;
+        
         // Mermiyi oluştur
         this.createProjectile();
     }
@@ -60,9 +63,9 @@ export class Projectile {
             }
             
             // Ön tanımlı değerler
-            const radius = this.options.radius || 0.2;
-            const color = this.options.color || 0xff0000;
-            const speed = this.options.speed || 50;
+            const radius = this.options && this.options.radius ? this.options.radius : 0.2;
+            const color = this.options && this.options.color ? this.options.color : 0xff0000;
+            const speed = this.options && this.options.speed ? this.options.speed : 50;
             
             // Mermi geometrisi ve materyali
             const geometry = new THREE.SphereGeometry(radius, 8, 8);
@@ -82,7 +85,7 @@ export class Projectile {
             }
             
             // Mermi yörüngesi için ışık izi
-            if (this.options.createTrail) {
+            if (this.options && this.options.createTrail) {
                 const trailGeometry = new THREE.CylinderGeometry(0.05, 0.05, 1, 8);
                 const trailMaterial = new THREE.MeshBasicMaterial({
                     color: 0xffff00,
@@ -93,29 +96,31 @@ export class Projectile {
                 this.trail.position.copy(this.position);
                 
                 // İzi doğru yönlendir
-                if (this.useForwardDirection && this.ownerObject && this.ownerObject.getQuaternion) {
+                if (this.useForwardDirection && this.options.ownerObject && this.options.ownerObject.getQuaternion) {
                     // Uçağın yönünü kullan
-                    const quaternion = this.ownerObject.getQuaternion();
+                    const quaternion = this.options.ownerObject.getQuaternion();
                     this.direction = new THREE.Vector3(0, 0, 1).applyQuaternion(quaternion);
                 }
                 
-                // İzi yönlendir
+                // İzi doğru yönlendir
                 this.trail.quaternion.setFromUnitVectors(
                     new THREE.Vector3(0, 1, 0),
                     this.direction.clone().normalize()
                 );
                 
+                // Sahneye ekle
                 if (this.scene) {
                     this.scene.add(this.trail);
                 }
             }
             
-            // Işık efekti ekle
-            if (this.options.addLight) {
+            // Işık ekle
+            if (this.options && this.options.addLight) {
                 const light = new THREE.PointLight(color, 1, 10);
                 light.position.copy(this.position);
                 this.light = light;
                 
+                // Sahneye ekle
                 if (this.scene) {
                     this.scene.add(this.light);
                 }

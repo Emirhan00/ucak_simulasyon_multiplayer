@@ -125,115 +125,233 @@ export class Aircraft {
      * @param {THREE.Vector3} position - Başlangıç pozisyonu
      */
     createAircraft(position) {
+        // İlk olarak eski uçak modelini oluştur (yedek olarak)
+        this.createBasicAircraft(position);
+        
+        // GLTF model yükle (varsa)
+        this.loadAircraftModel(position);
+    }
+    
+    createBasicAircraft(position) {
         try {
-            console.log('Creating aircraft at position:', position);
-            
-            // THREE.js yüklü mü kontrol et
-            if (typeof THREE === 'undefined') {
-                console.error('THREE is not defined. Make sure Three.js is loaded.');
-                throw new Error('THREE is not defined');
-            }
-            
-            // Scene kontrolü
-            if (!this.scene) {
-                console.error('Scene not provided to Aircraft');
-                throw new Error('Scene not provided to Aircraft');
-            }
-            
-            // Physics kontrolü
-            if (!this.physics) {
-                console.warn('Physics not provided to Aircraft, physics interactions will be disabled');
-            }
-            
-            // Uçak tipi için renk belirle
-            const color = this.aircraftData.color || 0xff0000;
-            
-            // Ana gövde
-            const bodyGeometry = new THREE.BoxGeometry(2, 1, 5);
-            const bodyMaterial = new THREE.MeshPhongMaterial({ color: color });
+            // Uçak gövdesi
+            const bodyGeometry = new THREE.CylinderGeometry(0.8, 0.8, 4, 8);
+            const bodyMaterial = new THREE.MeshPhongMaterial({
+                color: this.options.color || 0x0077be,
+                shininess: 100,
+                specular: 0x111111
+            });
             const body = new THREE.Mesh(bodyGeometry, bodyMaterial);
+            body.rotation.x = Math.PI / 2;
+            body.castShadow = true;
+            body.receiveShadow = true;
             
             // Kanatlar
-            const wingGeometry = new THREE.BoxGeometry(10, 0.2, 2);
-            const wingMaterial = new THREE.MeshPhongMaterial({ color: color });
+            const wingGeometry = new THREE.BoxGeometry(7, 0.2, 1.5);
+            const wingMaterial = new THREE.MeshPhongMaterial({
+                color: this.options.color || 0x0077be,
+                shininess: 30,
+                specular: 0x222222
+            });
             const wings = new THREE.Mesh(wingGeometry, wingMaterial);
-            wings.position.set(0, 0, 0);
+            wings.position.y = 0.1;
+            wings.castShadow = true;
+            wings.receiveShadow = true;
             
             // Kuyruk
-            const tailGeometry = new THREE.BoxGeometry(3, 1, 1);
-            const tailMaterial = new THREE.MeshPhongMaterial({ color: color });
-            const tail = new THREE.Mesh(tailGeometry, tailMaterial);
-            tail.position.set(0, 0.5, -2.5);
+            const tailGeometry = new THREE.BoxGeometry(1.5, 1, 0.2);
+            const tail = new THREE.Mesh(tailGeometry, wingMaterial);
+            tail.position.z = -2;
+            tail.position.y = 0.5;
+            tail.castShadow = true;
+            tail.receiveShadow = true;
+            
+            // Dikey kuyruk
+            const verticalTailGeometry = new THREE.BoxGeometry(0.2, 1, 1);
+            const verticalTail = new THREE.Mesh(verticalTailGeometry, wingMaterial);
+            verticalTail.position.z = -2;
+            verticalTail.position.y = 1;
+            verticalTail.castShadow = true;
+            verticalTail.receiveShadow = true;
             
             // Kokpit
-            const cockpitGeometry = new THREE.BoxGeometry(1, 0.5, 1.5);
-            const cockpitMaterial = new THREE.MeshPhongMaterial({ color: 0x87CEFA, transparent: true, opacity: 0.8 });
+            const cockpitGeometry = new THREE.SphereGeometry(0.8, 16, 16, 0, Math.PI * 2, 0, Math.PI / 2);
+            const cockpitMaterial = new THREE.MeshPhongMaterial({
+                color: 0x333333,
+                transparent: true,
+                opacity: 0.7,
+                shininess: 100,
+                specular: 0xffffff
+            });
             const cockpit = new THREE.Mesh(cockpitGeometry, cockpitMaterial);
-            cockpit.position.set(0, 0.75, 1);
+            cockpit.position.z = 1.2;
+            cockpit.position.y = 0.3;
+            cockpit.rotation.x = Math.PI;
+            cockpit.castShadow = true;
             
-            // Uçak modelini oluştur
+            // İniş takımları
+            const landingGearGeometry = new THREE.CylinderGeometry(0.1, 0.1, 0.8, 8);
+            const landingGearMaterial = new THREE.MeshPhongMaterial({
+                color: 0x333333
+            });
+            
+            const leftGear = new THREE.Mesh(landingGearGeometry, landingGearMaterial);
+            leftGear.position.set(-1, -0.6, 0);
+            leftGear.castShadow = true;
+            
+            const rightGear = new THREE.Mesh(landingGearGeometry, landingGearMaterial);
+            rightGear.position.set(1, -0.6, 0);
+            rightGear.castShadow = true;
+            
+            const rearGear = new THREE.Mesh(landingGearGeometry, landingGearMaterial);
+            rearGear.position.set(0, -0.6, -1.5);
+            rearGear.castShadow = true;
+            
+            // Tekerler
+            const wheelGeometry = new THREE.TorusGeometry(0.2, 0.1, 8, 16);
+            const wheelMaterial = new THREE.MeshPhongMaterial({
+                color: 0x222222
+            });
+            
+            const leftWheel = new THREE.Mesh(wheelGeometry, wheelMaterial);
+            leftWheel.position.set(-1, -1, 0);
+            leftWheel.rotation.x = Math.PI / 2;
+            leftWheel.castShadow = true;
+            
+            const rightWheel = new THREE.Mesh(wheelGeometry, wheelMaterial);
+            rightWheel.position.set(1, -1, 0);
+            rightWheel.rotation.x = Math.PI / 2;
+            rightWheel.castShadow = true;
+            
+            const rearWheel = new THREE.Mesh(wheelGeometry, wheelMaterial);
+            rearWheel.position.set(0, -1, -1.5);
+            rearWheel.rotation.x = Math.PI / 2;
+            rearWheel.castShadow = true;
+            
+            // Pervaneler veya motorlar
+            const propellerGeometry = new THREE.BoxGeometry(0.2, 1.5, 0.1);
+            const propellerMaterial = new THREE.MeshPhongMaterial({
+                color: 0x333333
+            });
+            
+            const propeller = new THREE.Mesh(propellerGeometry, propellerMaterial);
+            propeller.position.z = 2;
+            propeller.castShadow = true;
+            
+            // İniş takımlarını bir grup olarak ekle (açılıp kapanabilir)
+            this.landingGearGroup = new THREE.Group();
+            this.landingGearGroup.add(leftGear);
+            this.landingGearGroup.add(rightGear);
+            this.landingGearGroup.add(rearGear);
+            this.landingGearGroup.add(leftWheel);
+            this.landingGearGroup.add(rightWheel);
+            this.landingGearGroup.add(rearWheel);
+            
+            // Pervaneler için grup (dönebilir)
+            this.propGroup = new THREE.Group();
+            this.propGroup.add(propeller);
+            
+            // Tüm parçaları ana modele ekle
             this.mesh = new THREE.Group();
             this.mesh.add(body);
             this.mesh.add(wings);
             this.mesh.add(tail);
+            this.mesh.add(verticalTail);
             this.mesh.add(cockpit);
-            
-            // Gölge oluşturma
-            this.mesh.castShadow = true;
-            this.mesh.receiveShadow = false;
+            this.mesh.add(this.landingGearGroup);
+            this.mesh.add(this.propGroup);
             
             // Pozisyonu ayarla
             this.mesh.position.copy(position);
             
-            // Uçak adını gösteren sprite ekle
-            if (!this.isRemote) {
-                const nameSprite = this.createTextSprite(this.name);
-                nameSprite.position.set(0, 2, 0);
-                this.mesh.add(nameSprite);
+            // Uçak ID'si ve bilgileri
+            this.mesh.userData.aircraftId = this.id;
+            this.mesh.userData.ownerId = this.options.ownerId;
+            
+            // Uçak ismi metni
+            if (this.options.name) {
+                this.nameSprite = this.createTextSprite(this.options.name);
+                this.nameSprite.position.y = 2;
+                this.mesh.add(this.nameSprite);
             }
             
-            // Fizik gövdesi oluştur
-            if (this.physics) {
-                try {
-                    const bodyOptions = {
-                        mass: this.mass,
-                        position: new CANNON.Vec3(position.x, position.y, position.z),
-                        shape: 'box',
-                        dimensions: { x: 2, y: 1, z: 5 },
-                        material: 'aircraft'
-                    };
-                    
-                    this.body = this.physics.createAircraftBody(bodyOptions);
-                    
-                    // Çarpışma callback'i ekle
-                    if (this.body) {
-                        this.physics.addCollisionCallback(this.body.id, this.handleCollision.bind(this));
-                    }
-                } catch (physicsError) {
-                    console.error('Error creating aircraft physics body:', physicsError);
-                    console.warn('Continuing without physics for this aircraft');
-                }
+            // Sahneye ekle
+            if (this.options.scene) {
+                this.options.scene.add(this.mesh);
             }
             
-            console.log('Aircraft model created successfully');
+            console.log(`Basic aircraft model created with ID: ${this.id}`);
         } catch (error) {
-            console.error('Error creating aircraft model:', error);
+            console.error("Error creating basic aircraft model:", error);
+        }
+    }
+    
+    loadAircraftModel(position) {
+        // GLTF model yükleyici
+        if (!this.options.scene) {
+            console.warn("Scene not provided, skipping GLTF model loading");
+            return;
+        }
+        
+        try {
+            const loader = new THREE.GLTFLoader();
+            const modelUrl = 'https://threejs.org/examples/models/gltf/Parrot.glb'; // Örnek model URL (değiştirilebilir)
             
-            // Basit bir yedek model oluştur
-            try {
-                console.warn('Creating fallback aircraft model');
-                
-                // Basit bir küp oluştur
-                const geometry = new THREE.BoxGeometry(2, 1, 5);
-                const material = new THREE.MeshBasicMaterial({ color: 0xff0000, wireframe: true });
-                this.mesh = new THREE.Mesh(geometry, material);
-                this.mesh.position.copy(position);
-                
-                console.warn('Fallback aircraft model created');
-            } catch (fallbackError) {
-                console.error('Failed to create fallback aircraft model:', fallbackError);
-                throw new Error('Failed to create aircraft model');
-            }
+            loader.load(
+                modelUrl,
+                (gltf) => {
+                    // Modeli başarıyla yükledi
+                    const model = gltf.scene;
+                    
+                    // Modeli ölçeklendir ve pozisyonla
+                    model.scale.set(0.01, 0.01, 0.01); // Ölçeği modele göre ayarla
+                    model.position.copy(position);
+                    
+                    // Modele gölge ekle
+                    model.traverse((child) => {
+                        if (child.isMesh) {
+                            child.castShadow = true;
+                            child.receiveShadow = true;
+                        }
+                    });
+                    
+                    // Mevcut basit modeli kaldır ve GLTF modeli ekle
+                    if (this.mesh && this.options.scene) {
+                        this.options.scene.remove(this.mesh);
+                    }
+                    
+                    this.mesh = model;
+                    
+                    // Uçak ID'si ve bilgileri
+                    this.mesh.userData.aircraftId = this.id;
+                    this.mesh.userData.ownerId = this.options.ownerId;
+                    
+                    // İsim ekle
+                    if (this.options.name) {
+                        this.nameSprite = this.createTextSprite(this.options.name);
+                        this.nameSprite.position.y = 2;
+                        this.mesh.add(this.nameSprite);
+                    }
+                    
+                    // Sahneye ekle
+                    this.options.scene.add(this.mesh);
+                    
+                    console.log(`GLTF aircraft model loaded with ID: ${this.id}`);
+                },
+                (xhr) => {
+                    // Yükleme ilerlemesi
+                    const percentage = (xhr.loaded / xhr.total) * 100;
+                    console.log(`Loading aircraft model: ${Math.round(percentage)}%`);
+                },
+                (error) => {
+                    // Yükleme hatası
+                    console.error('Error loading GLTF model:', error);
+                    console.log("Continuing with basic aircraft model");
+                }
+            );
+        } catch (error) {
+            console.error("Error in GLTF loading process:", error);
+            console.log("Continuing with basic aircraft model");
         }
     }
     
@@ -589,10 +707,11 @@ export class Aircraft {
                 this.mesh.position.copy(this.body.position);
                 this.mesh.quaternion.copy(this.body.quaternion);
                 
-                // Pervanenin dönüşünü güncelle
-                if (this.propeller) {
-                    const propellerSpeed = this.isEngineStarted ? 30 * deltaTime * (this.speed / 10 + 0.5) : 0;
-                    this.propeller.rotation.z += propellerSpeed;
+                // Pervaneleri döndür (eğer motor çalışıyorsa)
+                if (this.propGroup && this.isEngineStarted) {
+                    // Pervane dönüş hızı throttle'a bağlı
+                    const propellerSpeed = 10 * inputs.throttle;
+                    this.propGroup.rotation.z += propellerSpeed * deltaTime;
                 }
                 
                 // Yerle temas kontrolü

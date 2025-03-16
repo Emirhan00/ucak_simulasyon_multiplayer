@@ -7,93 +7,94 @@ import { GameConstants } from '../constants/GameConstants.js';
 export class World {
     constructor(scene) {
         this.scene = scene;
+        
+        // Dünya özellikleri
+        this.worldSize = 10000;
+        this.groundSize = 20000;
+        this.groundTextureSize = 1024;
+        this.islandCount = 8;
+        this.cloudCount = 15;
+        this.buildingCount = 12;
+        this.treesCount = 50;
+        this.runwayLength = 1000;
+        this.runwayWidth = 60;
+        
+        this.materials = {};
         this.objects = {
             ground: null,
-            sky: null,
-            runway: null,        // Pist
-            runwayLights: [],    // Pist ışıkları
-            taxiways: [],        // Taksi yolları
-            hangar: null,        // Hangar
-            controlTower: null,  // Kontrol kulesi
-            clouds: [],
+            runway: null,
+            islands: [],
             buildings: [],
-            floatingIslands: [],
+            clouds: [],
             balloons: [],
-            zeppelins: []
+            zeppelins: [],
+            trees: []
         };
-        this.materials = {
-            ground: null,
-            beach: null,
-            runway: null,        // Pist materyali
-            runwayMarking: null, // Pist işaretleri
-            building: null,
-            roof: null,
-            cloud: null,
-            balloon: null,
-            zeppelin: null,
-            island: null
+        
+        // Atmosfer efektleri
+        this.fogColor = new THREE.Color(0xadd8e6);
+        this.fogDensity = 0.00025;
+        
+        // Skybox ve güneş
+        this.skyboxSize = 15000;
+        this.sunPosition = new THREE.Vector3(5000, 3000, -5000);
+        this.sunIntensity = 1.2;
+        this.timeOfDay = 'day'; // 'day', 'sunset', 'night'
+        
+        // Renk paleti
+        this.colors = {
+            ground: 0x6b8e23,
+            grass: 0x7cfc00,
+            water: 0x1e90ff,
+            runway: 0x303030,
+            markings: 0xffffff,
+            buildings: [0xd3d3d3, 0xe8e8e8, 0xa9a9a9],
+            islands: [0x228b22, 0x006400, 0x32cd32]
         };
-        this.worldSize = GameConstants.WORLD.SIZE;
         
-        // Pist parametreleri
-        this.runwayLength = 1000; // Pist uzunluğu (m)
-        this.runwayWidth = 50;    // Pist genişliği (m)
-        this.runwayPosition = new THREE.Vector3(0, 0.1, 0); // Pist pozisyonu
+        // Su efektleri için zaman
+        this.waterTime = 0;
         
-        console.log('World initialized');
+        this.setupLighting();
     }
     
     /**
      * Dünyayı oluştur
      */
     create() {
-        try {
-            console.log("Dünya oluşturuluyor...");
-            
-            // THREE yüklü mü kontrol et
-            if (typeof THREE === 'undefined') {
-                console.error('THREE is not defined. Make sure Three.js is loaded.');
-                throw new Error('THREE is not defined');
-            }
-            
-            // Scene kontrolü
-            if (!this.scene) {
-                console.error('Scene is not defined');
-                throw new Error('Scene is not defined');
-            }
-            
-            // Materyalleri oluştur
-            this.createMaterials();
-            
-            // Zemini oluştur
-            this.createGround();
-            
-            // Pisti oluştur
-            this.createRunway();
-            
-            // Havaalanı yapılarını oluştur
-            this.createAirport();
-            
-            // Bulutları oluştur
-            this.createClouds();
-            
-            // Binaları oluştur
-            this.createBuildings();
-            
-            // Balonları oluştur
-            this.createBalloons();
-            
-            // Zeplinleri oluştur
-            this.createZeppelins();
-            
-            // Adaları oluştur
-            this.createFloatingIslands();
-            
-            console.log("Dünya başarıyla oluşturuldu!");
-        } catch (error) {
-            console.error('Error creating world:', error);
-            throw error; // Kritik bir hata, yeniden fırlat
-        }
+        console.log("Creating 3D world...");
+        
+        // Materyal oluştur
+        this.createMaterials();
+        
+        // Skybox oluştur
+        this.createSkybox();
+        
+        // Su düzlemi oluştur
+        this.createWater();
+        
+        // Zemin oluştur
+        this.createGround();
+        
+        // Yol oluştur
+        this.createRunway();
+        this.createRunwayMarkings();
+        this.createRunwayLights();
+        
+        // Binalar, ağaçlar ve diğer objeler
+        this.createAirport();
+        this.createFloatingIslands();
+        this.createTrees();
+        
+        // Atmosferik efektler
+        this.createClouds();
+        this.createFog();
+        
+        // Hareketli objeler
+        this.createBalloons();
+        this.createZeppelins();
+        
+        console.log("3D world created successfully");
     }
     
     /**
@@ -265,9 +266,9 @@ export class World {
         
         const runway = new THREE.Mesh(runwayGeometry, this.materials.runway);
         runway.position.set(
-            this.runwayPosition.x,
+            0,
             GameConstants.WORLD.GROUND_HEIGHT + 0.05, // Zeminin biraz üzerinde
-            this.runwayPosition.z
+            0
         );
         runway.rotation.x = -Math.PI / 2;
         runway.receiveShadow = true;
@@ -296,9 +297,9 @@ export class World {
         
         const centerLine = new THREE.Mesh(centerLineGeometry, this.materials.runwayMarking);
         centerLine.position.set(
-            this.runwayPosition.x,
+            0,
             GameConstants.WORLD.GROUND_HEIGHT + 0.11, // Pistin biraz üzerinde
-            this.runwayPosition.z
+            0
         );
         centerLine.rotation.x = -Math.PI / 2;
         centerLine.receiveShadow = true;
@@ -314,9 +315,9 @@ export class World {
         // Sol kenar
         const leftEdge = new THREE.Mesh(edgeLineGeometry, this.materials.runwayMarking);
         leftEdge.position.set(
-            this.runwayPosition.x - this.runwayWidth / 2 + 1,
+            -this.runwayWidth / 2 + 1,
             GameConstants.WORLD.GROUND_HEIGHT + 0.11,
-            this.runwayPosition.z
+            0
         );
         leftEdge.rotation.x = -Math.PI / 2;
         leftEdge.receiveShadow = true;
@@ -325,9 +326,9 @@ export class World {
         // Sağ kenar
         const rightEdge = new THREE.Mesh(edgeLineGeometry, this.materials.runwayMarking);
         rightEdge.position.set(
-            this.runwayPosition.x + this.runwayWidth / 2 - 1,
+            this.runwayWidth / 2 - 1,
             GameConstants.WORLD.GROUND_HEIGHT + 0.11,
-            this.runwayPosition.z
+            0
         );
         rightEdge.rotation.x = -Math.PI / 2;
         rightEdge.receiveShadow = true;
@@ -335,7 +336,7 @@ export class World {
         
         // Eşik işaretleri (pist başı ve sonu)
         for (let end = -1; end <= 1; end += 2) {
-            const thresholdPosition = this.runwayPosition.z + (end * this.runwayLength / 2) - (end * 5);
+            const thresholdPosition = (end * this.runwayLength / 2) - (end * 5);
             
             // Eşik çizgileri
             for (let i = -4; i <= 4; i++) {
@@ -347,7 +348,7 @@ export class World {
                 
                 const thresholdLine = new THREE.Mesh(thresholdLineGeometry, this.materials.runwayMarking);
                 thresholdLine.position.set(
-                    this.runwayPosition.x + (i * 2),
+                    (i * 2),
                     GameConstants.WORLD.GROUND_HEIGHT + 0.11,
                     thresholdPosition
                 );
@@ -365,7 +366,7 @@ export class World {
             
             const runwayNumber = new THREE.Mesh(runwayNumberGeometry, this.materials.runwayMarking);
             runwayNumber.position.set(
-                this.runwayPosition.x,
+                0,
                 GameConstants.WORLD.GROUND_HEIGHT + 0.11,
                 thresholdPosition + (end * 15)
             );
@@ -398,9 +399,9 @@ export class World {
             for (let z = -this.runwayLength / 2 + 5; z <= this.runwayLength / 2 - 5; z += 20) {
                 const light = new THREE.Mesh(lightGeometry, lightMaterial);
                 light.position.set(
-                    this.runwayPosition.x + (side * this.runwayWidth / 2),
+                    (side * this.runwayWidth / 2),
                     GameConstants.WORLD.GROUND_HEIGHT + 0.15,
-                    this.runwayPosition.z + z
+                    z
                 );
                 light.rotation.x = Math.PI / 2;
                 this.scene.add(light);
@@ -416,12 +417,12 @@ export class World {
         
         // Yaklaşma ışıkları
         for (let end = -1; end <= 1; end += 2) {
-            const approachZ = this.runwayPosition.z + (end * (this.runwayLength / 2 + 30));
+            const approachZ = (end * (this.runwayLength / 2 + 30));
             
             for (let x = -10; x <= 10; x += 5) {
                 const light = new THREE.Mesh(lightGeometry, lightMaterial);
                 light.position.set(
-                    this.runwayPosition.x + x,
+                    x,
                     GameConstants.WORLD.GROUND_HEIGHT + 0.15,
                     approachZ
                 );
@@ -460,9 +461,9 @@ export class World {
         const towerBaseGeometry = new THREE.BoxGeometry(10, 5, 10);
         const towerBase = new THREE.Mesh(towerBaseGeometry, this.materials.building);
         towerBase.position.set(
-            this.runwayPosition.x + 30,
+            0,
             GameConstants.WORLD.GROUND_HEIGHT + 2.5,
-            this.runwayPosition.z - 20
+            0
         );
         towerBase.castShadow = true;
         towerBase.receiveShadow = true;
@@ -472,9 +473,9 @@ export class World {
         const towerBodyGeometry = new THREE.BoxGeometry(6, 15, 6);
         const towerBody = new THREE.Mesh(towerBodyGeometry, this.materials.building);
         towerBody.position.set(
-            this.runwayPosition.x + 30,
+            0,
             GameConstants.WORLD.GROUND_HEIGHT + 12.5,
-            this.runwayPosition.z - 20
+            0
         );
         towerBody.castShadow = true;
         towerBody.receiveShadow = true;
@@ -484,9 +485,9 @@ export class World {
         const towerCabinGeometry = new THREE.BoxGeometry(10, 5, 10);
         const towerCabin = new THREE.Mesh(towerCabinGeometry, this.materials.building);
         towerCabin.position.set(
-            this.runwayPosition.x + 30,
+            0,
             GameConstants.WORLD.GROUND_HEIGHT + 22.5,
-            this.runwayPosition.z - 20
+            0
         );
         towerCabin.castShadow = true;
         towerCabin.receiveShadow = true;
@@ -496,9 +497,9 @@ export class World {
         const towerRoofGeometry = new THREE.ConeGeometry(7, 5, 4);
         const towerRoof = new THREE.Mesh(towerRoofGeometry, this.materials.roof);
         towerRoof.position.set(
-            this.runwayPosition.x + 30,
+            0,
             GameConstants.WORLD.GROUND_HEIGHT + 27.5,
-            this.runwayPosition.z - 20
+            0
         );
         towerRoof.castShadow = true;
         towerRoof.receiveShadow = true;
@@ -520,9 +521,9 @@ export class World {
         const hangarBodyGeometry = new THREE.BoxGeometry(30, 15, 40);
         const hangarBody = new THREE.Mesh(hangarBodyGeometry, this.materials.building);
         hangarBody.position.set(
-            this.runwayPosition.x - 40,
+            0,
             GameConstants.WORLD.GROUND_HEIGHT + 7.5,
-            this.runwayPosition.z - 30
+            0
         );
         hangarBody.castShadow = true;
         hangarBody.receiveShadow = true;
@@ -532,9 +533,9 @@ export class World {
         const hangarRoofGeometry = new THREE.BoxGeometry(32, 2, 42);
         const hangarRoof = new THREE.Mesh(hangarRoofGeometry, this.materials.roof);
         hangarRoof.position.set(
-            this.runwayPosition.x - 40,
+            0,
             GameConstants.WORLD.GROUND_HEIGHT + 16,
-            this.runwayPosition.z - 30
+            0
         );
         hangarRoof.castShadow = true;
         hangarRoof.receiveShadow = true;
@@ -561,9 +562,9 @@ export class World {
         const mainTaxiwayGeometry = new THREE.BoxGeometry(15, 0.1, 100);
         const mainTaxiway = new THREE.Mesh(mainTaxiwayGeometry, taxiwayMaterial);
         mainTaxiway.position.set(
-            this.runwayPosition.x - 20,
+            0,
             GameConstants.WORLD.GROUND_HEIGHT + 0.06,
-            this.runwayPosition.z - 20
+            0
         );
         mainTaxiway.rotation.x = -Math.PI / 2;
         mainTaxiway.receiveShadow = true;
@@ -573,9 +574,9 @@ export class World {
         const connectorTaxiwayGeometry = new THREE.BoxGeometry(30, 0.1, 15);
         const connectorTaxiway = new THREE.Mesh(connectorTaxiwayGeometry, taxiwayMaterial);
         connectorTaxiway.position.set(
-            this.runwayPosition.x - 5,
+            0,
             GameConstants.WORLD.GROUND_HEIGHT + 0.06,
-            this.runwayPosition.z + 20
+            50
         );
         connectorTaxiway.rotation.x = -Math.PI / 2;
         connectorTaxiway.receiveShadow = true;
@@ -747,7 +748,7 @@ export class World {
             
             // Sahneye ekle
             this.scene.add(islandGroup);
-            this.objects.floatingIslands.push(islandGroup);
+            this.objects.islands.push(islandGroup);
         }
     }
     
@@ -885,64 +886,47 @@ export class World {
      * @param {number} deltaTime - Geçen süre (saniye)
      */
     update(deltaTime) {
+        // Su animasyonu
+        if (this.objects.water) {
+            this.waterTime += deltaTime * 0.1;
+            const waterMesh = this.objects.water;
+            const waterVertices = waterMesh.geometry.attributes.position;
+            
+            for (let i = 0; i < waterVertices.count; i++) {
+                const x = waterVertices.getX(i);
+                const z = waterVertices.getZ(i);
+                const y = Math.sin((x + this.waterTime) * 0.05) * 
+                          Math.cos((z + this.waterTime) * 0.05) * 5;
+                
+                waterVertices.setY(i, y);
+            }
+            
+            waterVertices.needsUpdate = true;
+        }
+        
         // Bulutları hareket ettir
         this.objects.clouds.forEach(cloud => {
-            cloud.position.x += 0.1 * deltaTime;
-            
-            // Dünya sınırlarını aşarsa diğer tarafa geçir
-            if (cloud.position.x > this.worldSize / 2) {
-                cloud.position.x = -this.worldSize / 2;
+            cloud.position.x += deltaTime * 5;
+            if (cloud.position.x > this.worldSize) {
+                cloud.position.x = -this.worldSize;
             }
+        });
+        
+        // Balonları hareket ettir
+        this.objects.balloons.forEach(balloon => {
+            balloon.position.y += Math.sin(this.waterTime * 0.5) * 0.2;
+            balloon.rotation.y += deltaTime * 0.1;
         });
         
         // Zeplinleri hareket ettir
         this.objects.zeppelins.forEach(zeppelin => {
-            // İleri doğru hareket
-            zeppelin.position.x += Math.sin(zeppelin.rotation.y) * 2 * deltaTime;
-            zeppelin.position.z += Math.cos(zeppelin.rotation.y) * 2 * deltaTime;
+            zeppelin.position.x += Math.cos(zeppelin.userData.direction) * deltaTime * 10;
+            zeppelin.position.z += Math.sin(zeppelin.userData.direction) * deltaTime * 10;
             
-            // Pervaneleri döndür
-            zeppelin.children.forEach(child => {
-                if (child.geometry && child.geometry.type === 'BoxGeometry' && child.geometry.parameters.height === 10) {
-                    child.rotation.z += 5 * deltaTime;
-                }
-            });
-            
-            // Dünya sınırlarını aşarsa yönünü değiştir
-            if (
-                zeppelin.position.x > this.worldSize / 2 ||
-                zeppelin.position.x < -this.worldSize / 2 ||
-                zeppelin.position.z > this.worldSize / 2 ||
-                zeppelin.position.z < -this.worldSize / 2
-            ) {
-                zeppelin.rotation.y += Math.PI; // 180 derece döndür
-            }
-        });
-        
-        // Balonları hafifçe hareket ettir
-        this.objects.balloons.forEach(balloon => {
-            // Rastgele hafif hareket
-            balloon.position.x += (Math.random() - 0.5) * 0.2 * deltaTime;
-            balloon.position.z += (Math.random() - 0.5) * 0.2 * deltaTime;
-            balloon.position.y += (Math.random() - 0.5) * 0.1 * deltaTime;
-            
-            // Dünya sınırlarını aşmasını engelle
-            if (balloon.position.x > this.worldSize / 2) {
-                balloon.position.x = this.worldSize / 2;
-            } else if (balloon.position.x < -this.worldSize / 2) {
-                balloon.position.x = -this.worldSize / 2;
-            }
-            
-            if (balloon.position.z > this.worldSize / 2) {
-                balloon.position.z = this.worldSize / 2;
-            } else if (balloon.position.z < -this.worldSize / 2) {
-                balloon.position.z = -this.worldSize / 2;
-            }
-            
-            if (balloon.position.y < 50) {
-                balloon.position.y = 50;
-            } else if (balloon.position.y > 500) {
-                balloon.position.y = 500;
+            // Sınırları kontrol et
+            if (Math.abs(zeppelin.position.x) > this.worldSize || 
+                Math.abs(zeppelin.position.z) > this.worldSize) {
+                zeppelin.userData.direction = Math.random() * Math.PI * 2;
             }
         });
     }
@@ -980,6 +964,135 @@ export class World {
                 this.materials[key].dispose();
                 this.materials[key] = null;
             }
+        }
+    }
+
+    setupLighting() {
+        // Ana ışık kaynağı (güneş)
+        const sunLight = new THREE.DirectionalLight(0xffffff, this.sunIntensity);
+        sunLight.position.copy(this.sunPosition);
+        sunLight.castShadow = true;
+        
+        // Gölgeler için ayarlar
+        sunLight.shadow.mapSize.width = 2048;
+        sunLight.shadow.mapSize.height = 2048;
+        sunLight.shadow.camera.near = 500;
+        sunLight.shadow.camera.far = 10000;
+        sunLight.shadow.camera.left = -2000;
+        sunLight.shadow.camera.right = 2000;
+        sunLight.shadow.camera.top = 2000;
+        sunLight.shadow.camera.bottom = -2000;
+        
+        this.scene.add(sunLight);
+        this.sunLight = sunLight;
+        
+        // Ambiyans ışığı
+        const ambientLight = new THREE.AmbientLight(0x404040, 0.6);
+        this.scene.add(ambientLight);
+        
+        // Hemisphere ışığı - gökyüzü ve yer renkleri arasında geçiş
+        const hemisphereLight = new THREE.HemisphereLight(0xadd8e6, 0x6b8e23, 0.4);
+        this.scene.add(hemisphereLight);
+    }
+
+    createSkybox() {
+        const path = 'https://raw.githubusercontent.com/mrdoob/three.js/dev/examples/textures/cube/skybox/';
+        const format = '.jpg';
+        const urls = [
+            path + 'px' + format, path + 'nx' + format,
+            path + 'py' + format, path + 'ny' + format,
+            path + 'pz' + format, path + 'nz' + format
+        ];
+        
+        // Varsayılan skybox kullan (online yoksa)
+        const loader = new THREE.CubeTextureLoader();
+        const textureCube = loader.load(urls, () => {
+            console.log("Skybox loaded successfully");
+        }, undefined, (err) => {
+            console.error("Skybox loading error:", err);
+            this.createFallbackSkybox();
+        });
+        
+        this.scene.background = textureCube;
+    }
+
+    createFallbackSkybox() {
+        const skyboxGeometry = new THREE.BoxGeometry(this.skyboxSize, this.skyboxSize, this.skyboxSize);
+        const skyboxMaterials = [
+            new THREE.MeshBasicMaterial({ color: 0x87ceeb, side: THREE.BackSide }), // right
+            new THREE.MeshBasicMaterial({ color: 0x87ceeb, side: THREE.BackSide }), // left
+            new THREE.MeshBasicMaterial({ color: 0x4169e1, side: THREE.BackSide }), // top
+            new THREE.MeshBasicMaterial({ color: 0x6b8e23, side: THREE.BackSide }), // bottom
+            new THREE.MeshBasicMaterial({ color: 0x87ceeb, side: THREE.BackSide }), // front
+            new THREE.MeshBasicMaterial({ color: 0x87ceeb, side: THREE.BackSide })  // back
+        ];
+        
+        const skybox = new THREE.Mesh(skyboxGeometry, skyboxMaterials);
+        this.scene.add(skybox);
+    }
+
+    createWater() {
+        // Su düzlemi
+        const waterGeometry = new THREE.PlaneGeometry(this.worldSize * 3, this.worldSize * 3, 32, 32);
+        
+        // Basit su materyali
+        const waterMaterial = new THREE.MeshPhongMaterial({
+            color: this.colors.water,
+            specular: 0xffffff,
+            shininess: 100,
+            transparent: true,
+            opacity: 0.8
+        });
+        
+        const water = new THREE.Mesh(waterGeometry, waterMaterial);
+        water.rotation.x = -Math.PI / 2;
+        water.position.y = -50;
+        water.receiveShadow = true;
+        
+        this.scene.add(water);
+        this.objects.water = water;
+    }
+
+    createFog() {
+        this.scene.fog = new THREE.FogExp2(this.fogColor, this.fogDensity);
+    }
+
+    createTrees() {
+        // Basit ağaç modeli
+        const trunkGeometry = new THREE.CylinderGeometry(5, 8, 40, 8);
+        const leavesGeometry = new THREE.ConeGeometry(25, 60, 8);
+        
+        const trunkMaterial = new THREE.MeshLambertMaterial({ color: 0x8b4513 });
+        const leavesMaterial = new THREE.MeshLambertMaterial({ color: 0x228b22 });
+        
+        for (let i = 0; i < this.treesCount; i++) {
+            const trunk = new THREE.Mesh(trunkGeometry, trunkMaterial);
+            const leaves = new THREE.Mesh(leavesGeometry, leavesMaterial);
+            
+            trunk.castShadow = true;
+            trunk.receiveShadow = true;
+            leaves.castShadow = true;
+            leaves.receiveShadow = true;
+            
+            leaves.position.y = 45;
+            
+            const tree = new THREE.Group();
+            tree.add(trunk);
+            tree.add(leaves);
+            
+            // Rastgele orman bölgesinde konumlandır
+            const x = (Math.random() - 0.5) * this.groundSize * 0.7;
+            const z = (Math.random() - 0.5) * this.groundSize * 0.7;
+            
+            // Pistlere çok yakın olmasın
+            if (Math.abs(x) < this.runwayWidth * 2 && Math.abs(z) < this.runwayLength * 0.6) {
+                continue;
+            }
+            
+            tree.position.set(x, 0, z);
+            
+            this.scene.add(tree);
+            this.objects.trees.push(tree);
         }
     }
 } 

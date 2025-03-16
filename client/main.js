@@ -14,14 +14,26 @@ import { Effects } from './src/classes/Effects.js';
 import { NetworkManager } from './src/network/NetworkManager.js';
 import { GameConstants } from './src/constants/GameConstants.js';
 import { EngineSystem } from './src/classes/EngineSystem.js';
+import { ChatSystem } from './src/classes/ChatSystem.js';
+import { Player } from './src/classes/Player.js';
+import { Enemy } from './src/classes/Enemy.js';
+import { Projectile } from './src/classes/Projectile.js';
 
 // Global değişkenler
 let scene, camera, renderer, stats;
 let world, aircraft, controls, physics, ui, mission, effects, networkManager;
 let clock, delta;
-let isGameRunning = false;
+let isGameActive = false; // Tek bir değişken kullanıyoruz - isGameRunning değil
 let currentPlayer = null;
 let otherPlayers = new Map(); // id -> aircraft
+let localPlayer;
+let cameraView;
+let lastTime = 0;
+let lastFireTime = 0;
+let projectiles = [];
+let enemies = [];
+let chatSystem; // ChatSystem için değişkeni tanımla
+let orbitControls; // Orbit kontroller için değişkeni tanımla
 
 // Hata ayıklama modu
 const DEBUG = true;
@@ -51,6 +63,9 @@ function init() {
         console.log('Initializing game...');
         console.log('Browser:', navigator.userAgent);
         console.log('Window size:', window.innerWidth, 'x', window.innerHeight);
+        
+        // Global değişkeni window'a ekle
+        window.isGameActive = isGameActive;
         
         // Gerekli kütüphaneleri kontrol et
         console.log('Checking required libraries...');
@@ -241,236 +256,222 @@ function setupStats() {
 // Oyun bileşenlerini oluştur
 function setupGameComponents() {
     try {
-        debug('Setting up game components...');
-        
-        // THREE.js ve CANNON.js yüklü mü kontrol et
-        if (typeof THREE === 'undefined') {
-            debugError('THREE is not defined. Make sure Three.js is loaded.');
-            throw new Error('THREE is not defined');
-        }
-        
-        if (typeof CANNON === 'undefined') {
-            debugError('CANNON is not defined. Make sure Cannon.js is loaded.');
-            throw new Error('CANNON is not defined');
-        }
-        
-        // Her bileşeni ayrı try-catch bloklarında oluştur
-        // Bu şekilde bir bileşen başarısız olsa bile diğerleri yüklenebilir
+        console.log('Setting up game components...');
         
         // World oluştur
-        try {
-            debug('Creating World...');
-            world = new World(scene);
-            world.create();
-            debug('World created successfully');
-        } catch (worldError) {
-            debugError('Error creating World:', worldError);
-            // Kritik bileşen, hata fırlat
-            throw worldError;
-        }
+        world = new World(scene);
+        world.create();
         
         // Physics oluştur
-        try {
-            debug('Creating Physics...');
-            physics = new Physics();
-            physics.init();
-            debug('Physics initialized successfully');
-        } catch (physicsError) {
-            debugError('Error creating Physics:', physicsError);
-            // Kritik bileşen, hata fırlat
-            throw physicsError;
-        }
+        physics = new Physics();
+        physics.init();
         
-        // Controls oluştur
-        try {
-            debug('Creating FlightControls...');
-            controls = new FlightControls();
-            controls.init();
-            debug('FlightControls initialized successfully');
-        } catch (controlsError) {
-            debugError('Error creating FlightControls:', controlsError);
-            // Kritik bileşen, hata fırlat
-            throw controlsError;
-        }
+        // FlightControls oluştur
+        controls = new FlightControls();
+        controls.init();
         
         // UI oluştur
-        try {
-            debug('Creating UI...');
-            ui = new UI();
-            ui.init();
-            debug('UI initialized successfully');
-        } catch (uiError) {
-            debugError('Error creating UI:', uiError);
-            // UI kritik değil, devam et
-            debugWarn('Continuing without UI, some features may not work properly');
-            ui = {
-                update: () => {},
-                showHitInfo: () => {},
-                showLoginScreen: () => {},
-                hideAllScreens: () => {},
-                updateScoreTable: () => {}
-            };
-        }
+        ui = new UI();
+        ui.init();
         
-        // Mission oluştur
-        try {
-            debug('Creating Mission...');
-            mission = new Mission(ui);
-            mission.init();
-            debug('Mission initialized successfully');
-        } catch (missionError) {
-            debugError('Error creating Mission:', missionError);
-            // Mission kritik değil, devam et
-            debugWarn('Continuing without Mission system');
-            mission = {
-                update: () => {},
-                init: () => {}
-            };
-        }
-        
-        // Effects oluştur
-        try {
-            debug('Creating Effects...');
-            effects = new Effects(scene, ui);
-            effects.init();
-            debug('Effects initialized successfully');
-        } catch (effectsError) {
-            debugError('Error creating Effects:', effectsError);
-            // Effects kritik değil, devam et
-            debugWarn('Continuing without Effects system');
-            effects = {
-                update: () => {},
-                showMessage: () => {},
-                playEngineSound: () => {},
-                playFireSound: () => {},
-                playTakeoffSound: () => {},
-                playLandingSound: () => {}
-            };
-        }
+        // Efektler
+        effects = new Effects(scene, ui);
+        effects.init();
         
         // NetworkManager oluştur
-        try {
-            debug('Creating NetworkManager...');
-            networkManager = new NetworkManager();
-            networkManager.init({
-                onConnect: handleConnect,
-                onDisconnect: handleDisconnect,
-                onLoginSuccess: handleLoginSuccess,
-                onLoginError: handleLoginError,
-                onPlayerJoin: handlePlayerJoin,
-                onPlayerLeave: handlePlayerLeave,
-                onPlayerUpdate: handlePlayerUpdate,
-                onRoomList: handleRoomList,
-                onRoomJoin: handleRoomJoin,
-                onRoomLeave: handleRoomLeave,
-                onGameStart: handleGameStart,
-                onGameEnd: handleGameEnd,
-                onChatMessage: handleChatMessage,
-                onHit: handleHit
+        networkManager = new NetworkManager();
+        networkManager.init({
+            onConnect: handleConnect,
+            onDisconnect: handleDisconnect,
+            onLoginSuccess: handleLoginSuccess,
+            onLoginError: handleLoginError,
+            onPlayerJoin: handlePlayerJoin,
+            onPlayerLeave: handlePlayerLeave,
+            onPlayerUpdate: handlePlayerUpdate,
+            onRoomList: handleRoomList,
+            onRoomJoin: handleRoomJoin,
+            onRoomLeave: handleRoomLeave,
+            onGameStart: handleGameStart,
+            onGameEnd: handleGameEnd,
+            onChatMessage: handleChatMessage,
+            onHit: handleHit
+        });
+        
+        // ChatSystem oluştur
+        chatSystem = new ChatSystem(ui, networkManager);
+        chatSystem.init();
+        
+        // Oyuncu oluştur
+        localPlayer = new Player({
+            id: 'local-player',
+            name: 'Player',
+            scene: scene,
+            physics: physics,
+            controls: controls,
+            effects: effects,
+            isLocal: true
+        });
+        
+        // Uçağımızı pozisyonla
+        const startPosition = new THREE.Vector3(0, 100, 0);
+        aircraft = new Aircraft({
+            id: 'player-aircraft',
+            ownerId: 'local-player',
+            name: 'Player Aircraft',
+            scene: scene,
+            physics: physics, 
+            position: startPosition,
+            color: 0x0088ff,
+            team: 'blue',
+            effects: effects
+        });
+        localPlayer.setAircraft(aircraft);
+        
+        // Enemy AI uçaklar (test için)
+        enemies = [];
+        for (let i = 0; i < 3; i++) {
+            const enemyPosition = new THREE.Vector3(
+                200 * (Math.random() - 0.5),
+                100 + 50 * Math.random(),
+                200 * (Math.random() - 0.5)
+            );
+            
+            const enemy = new Enemy({
+                id: `enemy-${i}`,
+                name: `Enemy ${i+1}`,
+                scene: scene,
+                physics: physics,
+                position: enemyPosition,
+                color: 0xff0000,
+                team: 'red',
+                effects: effects
             });
-            debug('NetworkManager initialized successfully');
-        } catch (networkError) {
-            debugError('Error creating NetworkManager:', networkError);
-            // NetworkManager kritik değil, çevrimdışı mod için devam et
-            debugWarn('Continuing in offline mode');
-            networkManager = {
-                init: () => {},
-                sendPlayerUpdate: () => {},
-                lastUpdateTime: 0,
-                login: (username) => {
-                    // Offline mod için basit bir login simülasyonu
-                    setTimeout(() => {
-                        if (handleLoginSuccess) {
-                            handleLoginSuccess({
-                                id: 'local-player',
-                                username: username,
-                                isHost: true
-                            });
-                        }
-                    }, 500);
-                }
-            };
+            
+            enemies.push(enemy);
         }
         
-        debug('All game components set up successfully');
+        // Projectiles array
+        projectiles = [];
+        
+        // UI için oyuncu bilgilerini ayarla
+        ui.updatePlayerName('You');
+        ui.updatePlayerCount(1);
+        
+        // Kamerayı uçağa bağla
+        camera.position.set(0, 10, -20);
+        
+        // İlk kamera görünümü
+        cameraView = 'follow';
+        
+        // Oyun henüz aktif değil - login sonrası aktifleşecek
+        isGameActive = false;
+        window.isGameActive = false;
+        
+        console.log('Game components setup complete');
     } catch (error) {
-        debugError('Error setting up game components:', error);
-        debugError('Stack trace:', error.stack);
-        alert('Failed to set up game components. Please refresh the page and try again.');
-        throw error; // Yeniden fırlat
+        console.error('Error setting up game components:', error);
     }
 }
 
 // Event listener'ları ekle
 function setupEventListeners() {
-    // Login butonu
-    document.getElementById('login-btn').addEventListener('click', function() {
-        console.log('Login button clicked');
-        const username = document.getElementById('username').value.trim();
-        if (username) {
-            console.log('Login attempt with username:', username);
-            networkManager.login(username);
-        } else {
-            alert('Please enter a username');
-        }
-    });
+    console.log('Setting up event listeners...');
     
-    // Username input Enter tuşu
-    document.getElementById('username').addEventListener('keypress', function(e) {
-        if (e.key === 'Enter') {
-            console.log('Enter key pressed in username input');
-            const username = document.getElementById('username').value.trim();
-            if (username) {
-                console.log('Login attempt with username:', username);
-                networkManager.login(username);
+    try {
+        // Login form event listener'ı
+        const loginForm = document.getElementById('login-form');
+        
+        if (loginForm) {
+            console.log('Setting up login form submit event listener');
+            
+            loginForm.addEventListener('submit', function(e) {
+                e.preventDefault();
+                console.log('Login form submitted');
+                handleLoginButtonClick();
+                return false;
+            });
+        } else {
+            console.error('Login form not found in the DOM');
+            
+            // Fallback - login buton event listener'ı
+            const loginBtn = document.getElementById('login-btn');
+            
+            if (loginBtn) {
+                console.log('Setting up login button event listener (fallback)');
+                
+                loginBtn.addEventListener('click', function() {
+                    console.log('Login button clicked');
+                    handleLoginButtonClick();
+                });
             } else {
-                alert('Please enter a username');
+                console.error('Login button not found in the DOM');
             }
         }
-    });
+        
+        // Keyboard event listener'ları
+        document.addEventListener('keydown', function(e) {
+            if (e.code === 'KeyV' && isGameActive) {
+                // Kamera değiştirme
+                toggleCameraView();
+            }
+        });
+        
+        console.log('Event listeners setup complete');
+    } catch (error) {
+        console.error('Error setting up event listeners:', error);
+    }
+}
+
+// Login butonu işlevi
+function handleLoginButtonClick() {
+    const usernameInput = document.getElementById('username');
     
-    // Create Room butonu
-    document.getElementById('create-room-btn').addEventListener('click', () => {
-        document.getElementById('create-room-submit').style.display = 'block';
-        document.querySelector('.lobby-section:nth-child(2)').style.display = 'block';
-    });
+    if (!usernameInput) {
+        console.error('Username input element not found');
+        return;
+    }
     
-    // Create Room Submit butonu
-    document.getElementById('create-room-submit').addEventListener('click', handleCreateRoom);
+    const username = usernameInput.value.trim();
+    console.log('Login attempt with username:', username);
     
-    // Refresh Rooms butonu
-    document.getElementById('refresh-rooms-btn').addEventListener('click', () => {
-        networkManager.getRoomList();
-    });
-    
-    // Ready butonu
-    document.getElementById('ready-btn').addEventListener('click', handleReady);
-    
-    // Leave Room butonu
-    document.getElementById('leave-room-btn').addEventListener('click', handleRoomLeave);
-    
-    // Chat Send butonu
-    document.getElementById('chat-send').addEventListener('click', handleSendChat);
-    
-    // Chat input Enter tuşu
-    document.getElementById('chat-input').addEventListener('keypress', (e) => {
-        if (e.key === 'Enter') {
-            handleSendChat();
+    if (username) {
+        // Login butonunu güncelle
+        const loginButton = document.getElementById('login-btn');
+        if (loginButton) {
+            loginButton.innerText = 'Logging in...';
+            loginButton.disabled = true;
         }
-    });
-    
-    // Feedback butonu
-    document.getElementById('feedback-btn').addEventListener('click', () => {
-        document.getElementById('feedback-modal').classList.remove('hidden');
-    });
-    
-    // Close Modal butonu
-    document.querySelector('.close-modal').addEventListener('click', () => {
-        document.getElementById('feedback-modal').classList.add('hidden');
-    });
-    
-    // Submit Feedback butonu
-    document.getElementById('submit-feedback').addEventListener('click', handleSubmitFeedback);
+        
+        // NetworkManager login çağrısı
+        if (networkManager) {
+            networkManager.login(username);
+        } else {
+            console.error('NetworkManager not initialized');
+            
+            // NetworkManager yoksa bile offline login simüle et
+            if (ui) {
+                ui.hideAllScreens();
+            }
+            
+            // Oyunu aktif et
+            isGameActive = true;
+            window.isGameActive = true;
+            
+            // Oyuncu adını ayarla
+            if (ui && ui.updatePlayerName) {
+                ui.updatePlayerName(username);
+            }
+            
+            // Login butonunu resetle
+            if (loginButton) {
+                loginButton.innerText = 'Login';
+                loginButton.disabled = false;
+            }
+        }
+    } else {
+        console.warn('Empty username provided');
+        alert('Please enter a username');
+    }
 }
 
 // Pencere boyutu değiştiğinde yeniden boyutlandır
@@ -484,412 +485,261 @@ function onWindowResize() {
  * Animasyon döngüsü
  */
 function animate() {
-    requestAnimationFrame(animate);
-    
     try {
-        // Delta time hesapla
-        delta = clock.getDelta();
+        requestAnimationFrame(animate);
         
-        // Stats güncelle (eğer tanımlıysa)
-        if (stats) {
-            stats.update();
+        // Zamanlama
+        const now = performance.now();
+        let deltaTime = (now - lastTime) / 1000; // Saniye cinsinden
+        
+        // Aşırı büyük delta zamanı kısıtla
+        deltaTime = Math.min(deltaTime, 0.1);
+        lastTime = now;
+        
+        // Stats güncelle
+        if (stats) stats.begin();
+        
+        // Oyun aktif mi kontrol et
+        if (!isGameActive) {
+            // Oyun aktif değilse sadece renderer güncelle
+            renderer.render(scene, camera);
+            if (stats) stats.end();
+            return;
         }
         
-        // Oyun çalışıyorsa güncelle
-        if (isGameRunning && currentPlayer) {
-            try {
-                // Kontrolleri güncelle
-                if (controls) {
-                    controls.update(delta);
-                }
-                
-                // Kontrol değerlerini al
-                const inputs = controls ? controls.getInputs() : {};
-                
-                // Oyuncuyu güncelle
-                if (currentPlayer && currentPlayer.update) {
-                    currentPlayer.update(delta, inputs);
-                }
-                
-                // Diğer oyuncuları güncelle
-                if (otherPlayers) {
-                    otherPlayers.forEach(player => {
-                        if (player && player.update) {
-                            player.update(delta);
-                        }
-                    });
-                }
-                
-                // Fiziği güncelle
-                if (physics && physics.update) {
-                    physics.update(delta);
-                }
-                
-                // Kamerayı güncelle
+        // World güncelle
+        if (world) world.update(deltaTime);
+        
+        // Physics güncelle
+        if (physics) physics.update(deltaTime);
+        
+        // Controls güncelle
+        if (controls) controls.update(deltaTime);
+        
+        // Kontrolleri al
+        const inputs = controls ? controls.getInputs() : {};
+        
+        // Player güncelle
+        if (localPlayer) {
+            localPlayer.update(deltaTime);
+            
+            // Kamera pozisyonu
+            if (cameraView === 'follow' && aircraft && aircraft.mesh) {
                 updateCamera();
-                
-                // Dünyayı güncelle
-                if (world && world.update) {
-                    world.update(delta);
-                }
-                
-                // Efektleri güncelle
-                if (effects && effects.update) {
-                    effects.update(delta);
-                }
-                
-                // Görevleri güncelle
-                if (mission && mission.update) {
-                    mission.update(delta, currentPlayer);
-                }
-                
-                // Ağ güncellemesi gönder (her 60ms'de bir)
-                const now = Date.now();
-                if (networkManager && networkManager.sendPlayerUpdate && 
-                    now - (networkManager.lastUpdateTime || 0) > (GameConstants.NETWORK.UPDATE_RATE || 60)) {
-                    
-                    if (currentPlayer) {
-                        networkManager.sendPlayerUpdate({
-                            position: currentPlayer.getPosition ? currentPlayer.getPosition() : { x: 0, y: 0, z: 0 },
-                            rotation: currentPlayer.getRotation ? currentPlayer.getRotation() : { x: 0, y: 0, z: 0 },
-                            speed: currentPlayer.getSpeed ? currentPlayer.getSpeed() : 0
-                        });
-                    }
-                    
-                    networkManager.lastUpdateTime = now;
-                    
-                    // Skor tablosunu periyodik olarak güncelle (her 5 saniyede bir)
-                    if (now % 5000 < 100 && ui && ui.updateScoreTable) { // 5 saniyede bir, 100ms tolerans
-                        // Tüm oyuncuların güncel verilerini topla
-                        const allPlayers = [];
-                        
-                        if (currentPlayer) {
-                            allPlayers.push({
-                                id: currentPlayer.id,
-                                name: currentPlayer.name,
-                                score: currentPlayer.getScore ? currentPlayer.getScore() : 0,
-                                kills: currentPlayer.getKills ? currentPlayer.getKills() : 0,
-                                deaths: currentPlayer.getDeaths ? currentPlayer.getDeaths() : 0
-                            });
-                        }
-                        
-                        if (otherPlayers) {
-                            otherPlayers.forEach(player => {
-                                if (player) {
-                                    allPlayers.push({
-                                        id: player.id,
-                                        name: player.name,
-                                        score: player.getScore ? player.getScore() : 0,
-                                        kills: player.getKills ? player.getKills() : 0,
-                                        deaths: player.getDeaths ? player.getDeaths() : 0
-                                    });
-                                }
-                            });
-                        }
-                        
-                        // Skor tablosunu güncelle
-                        ui.updateScoreTable(allPlayers);
-                    }
-                }
-            } catch (gameError) {
-                debugError('Error in game loop:', gameError);
-                debugError('Stack trace:', gameError.stack);
+            }
+            
+            // Ateş etme
+            if (inputs.fire) {
+                handleFire();
+            }
+            
+            // Kamera görünümü değiştirme
+            if (inputs.cameraToggle) {
+                toggleCameraView();
             }
         }
+        
+        // Mermileri güncelle
+        updateProjectiles(deltaTime);
+        
+        // Düşman uçakları güncelle
+        updateEnemies(deltaTime);
+        
+        // UI güncelle
+        updateUI();
+        
+        // Effects güncelle
+        if (effects) effects.update(deltaTime);
         
         // Render
-        if (renderer && scene && camera) {
-            renderer.render(scene, camera);
-        }
+        renderer.render(scene, camera);
+        
+        // Stats güncelle
+        if (stats) stats.end();
     } catch (error) {
-        debugError('Critical error in animation loop:', error);
-        debugError('Stack trace:', error.stack);
+        console.error('Error in animation loop:', error);
     }
 }
 
-// Kamerayı oyuncuya bağla
-function updateCamera() {
-    if (!currentPlayer) return;
+function handleFire() {
+    // Ateş etme kısıtlaması
+    const now = Date.now();
+    if (now - lastFireTime < 200) { // 5 ateş/saniye
+        return;
+    }
+    lastFireTime = now;
     
-    const position = currentPlayer.getPosition();
-    const rotation = currentPlayer.getRotation();
+    if (!aircraft || !aircraft.isAlive() || !isGameActive) {
+        return;
+    }
     
-    // Uçağın arkasında ve biraz yukarısında
-    const offset = new THREE.Vector3(
-        -15 * Math.sin(rotation.y),
-        5,
-        -15 * Math.cos(rotation.y)
-    );
+    // Mermi oluştur
+    const position = aircraft.getPosition().clone();
     
-    camera.position.copy(position).add(offset);
-    camera.lookAt(position);
-}
-
-/**
- * Oyunu başlat
- * @param {Object} playerData - Oyuncu verileri
- * @param {Object} roomData - Oda verileri
- */
-function startGame(playerData, roomData) {
+    // Uçağın ön tarafına offset ekle
+    const direction = new THREE.Vector3(0, 0, 1).applyQuaternion(aircraft.getQuaternion());
+    position.add(direction.clone().multiplyScalar(3)); // Uçağın 3 birim önünde
+    
+    // Mermi oluştur
     try {
-        debug('Starting game with player data:', playerData);
-        debug('Room data:', roomData);
+        const projectile = new Projectile({
+            id: `projectile-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
+            ownerId: 'local-player',
+            position: position,
+            direction: direction,
+            speed: 100,
+            damage: 10,
+            scene: scene,
+            lifeTime: 3,
+            ownerObject: aircraft,
+            team: 'blue',
+            color: 0x0088ff,
+            createTrail: true,
+            addLight: true
+        });
         
-        // Eğer oyun zaten çalışıyorsa, önce durdur
-        if (isGameRunning) {
-            debug('Game is already running, stopping first...');
-            stopGame();
-        }
+        projectiles.push(projectile);
         
-        // Oyuncu ID'sini global değişkene kaydet
-        window.currentPlayerId = playerData.id;
-        debug('Current player ID set to:', window.currentPlayerId);
-        
-        // Login ekranını gizle
-        if (ui && ui.hideAllScreens) {
-            ui.hideAllScreens();
-            debug('All screens hidden');
-        } else {
-            debugWarn('UI not available, cannot hide screens');
-        }
-        
-        // THREE.js ve CANNON.js yüklü mü kontrol et
-        if (typeof THREE === 'undefined') {
-            debugError('THREE is not defined. Make sure Three.js is loaded.');
-            alert('Three.js is not loaded. Please check your internet connection and try again.');
-            return;
-        }
-        
-        if (typeof CANNON === 'undefined') {
-            debugError('CANNON is not defined. Make sure Cannon.js is loaded.');
-            alert('Cannon.js is not loaded. Please check your internet connection and try again.');
-            return;
-        }
-        
-        // Dünyayı oluştur
-        try {
-            debug('Creating world...');
-            if (!world) {
-                debugError('World is not initialized');
-                throw new Error('World is not initialized');
-            }
-            world.create();
-            debug('World created successfully');
-        } catch (error) {
-            debugError('Failed to create world:', error);
-            alert('Failed to create game world. Please try again.');
-            return;
-        }
-        
-        // Başlangıç pozisyonunu ayarla
-        const startPosition = new THREE.Vector3(
-            playerData.position ? playerData.position.x : 0,
-            playerData.position ? playerData.position.y : 100,
-            playerData.position ? playerData.position.z : 0
-        );
-        
-        debug('Creating player aircraft at position:', startPosition);
-        
-        // Uçak oluştur
-        try {
-            debug('Creating player aircraft...');
-            
-            if (!scene) {
-                debugError('Scene is not initialized');
-                throw new Error('Scene is not initialized');
-            }
-            
-            if (!physics) {
-                debugError('Physics is not initialized');
-                throw new Error('Physics is not initialized');
-            }
-            
-            currentPlayer = new Aircraft({
-                id: playerData.id,
-                name: playerData.username,
-                type: playerData.type || 'fighter',
-                position: startPosition,
-                scene: scene,
-                physics: physics,
-                effects: effects,
-                ui: ui,
-                isRemote: false
-            });
-            
-            debug('Aircraft instance created:', currentPlayer);
-            
-            // Uçağın oluşturulduğunu kontrol et
-            if (!currentPlayer) {
-                debugError('Failed to create player aircraft - currentPlayer is null');
-                throw new Error('Failed to create player aircraft');
-            }
-            
-            if (!currentPlayer.getMesh()) {
-                debugError('Failed to create player aircraft - mesh is null');
-                throw new Error('Failed to create player aircraft mesh');
-            }
-            
-            debug('Player aircraft created successfully');
-            
-            // Uçağı sahneye ekle
-            debug('Adding aircraft to scene');
-            scene.add(currentPlayer.getMesh());
-            debug('Player aircraft added to scene');
-            
-            // Kamerayı uçağa bağla
-            debug('Attaching camera to aircraft');
-            camera.position.set(0, 5, -15);
-            camera.lookAt(new THREE.Vector3(0, 0, 0));
-            currentPlayer.getMesh().add(camera);
-            debug('Camera attached to aircraft');
-            
-            // Oyuncu bilgilerini UI'da göster
-            if (ui) {
-                debug('Updating UI with player info');
-                ui.updatePlayerName(playerData.username);
-                ui.updatePlayerCount(roomData.players.length);
-            }
-            
-            // Görevleri yükle
-            if (mission) {
-                debug('Loading missions for game mode:', roomData.gameMode);
-                mission.loadMissions(roomData.gameMode);
-            }
-            
-            // Diğer oyuncuları ekle
-            debug('Adding other players from room data');
-            if (roomData.players && Array.isArray(roomData.players)) {
-                roomData.players.forEach(player => {
-                    if (player.id !== playerData.id) {
-                        debug('Adding other player:', player.id);
-                        addOtherPlayer(player);
-                    }
-                });
-            }
-            
-            // Oyunu başlat
-            isGameRunning = true;
-            debug('Game started successfully');
-            
-            // Bildirim göster
-            if (effects) {
-                effects.showMessage('Game started!', 'success');
-            }
-            
-            return true;
-        } catch (error) {
-            debugError('Failed to start game:', error);
-            alert('Failed to start game. Please try again.');
-            return false;
+        // Ses efekti
+        if (effects) {
+            effects.playFireSound();
         }
     } catch (error) {
-        debugError('Critical error starting game:', error);
-        alert('Critical error starting game. Please refresh the page and try again.');
-        return false;
+        console.error('Error creating projectile:', error);
     }
 }
 
-/**
- * Oyunu durdur
- */
-function stopGame() {
-    console.log('Stopping game...');
+function updateProjectiles(deltaTime) {
+    // Aktif mermileri filtrele
+    const targets = enemies.map(enemy => enemy.aircraft).filter(aircraft => aircraft && aircraft.isAlive && aircraft.isAlive());
     
-    // Oyuncu uçağını kaldır
-    if (currentPlayer) {
-        if (currentPlayer.getMesh()) {
-            scene.remove(currentPlayer.getMesh());
-        }
-        if (currentPlayer.getBody && currentPlayer.getBody()) {
-            physics.removeBody(currentPlayer.getBody());
-        }
-        if (currentPlayer.dispose) {
-            currentPlayer.dispose();
-        }
-        currentPlayer = null;
-    }
-    
-    // Diğer oyuncuları kaldır
-    otherPlayers.forEach(player => {
-        if (player.getMesh()) {
-            scene.remove(player.getMesh());
-        }
-        if (player.getBody && player.getBody()) {
-            physics.removeBody(player.getBody());
-        }
-        if (player.dispose) {
-            player.dispose();
+    projectiles = projectiles.filter(projectile => {
+        return projectile && projectile.update(deltaTime, targets);
+    });
+}
+
+function updateEnemies(deltaTime) {
+    enemies.forEach(enemy => {
+        if (enemy && enemy.aircraft) {
+            // Hedef olarak oyuncuyu ver
+            const targets = [aircraft];
+            // Mermi listesini ver
+            enemy.updateEnemy(deltaTime, targets, projectiles);
         }
     });
-    otherPlayers.clear();
-    
-    // Dünyayı temizle
-    if (world && world.dispose) {
-        world.dispose();
-    }
-    
-    // Fizik motorunu sıfırla
-    if (physics && physics.dispose) {
-        physics.dispose();
-    }
-    
-    // Kamerayı sıfırla
-    if (camera) {
-        camera.position.set(0, 10, 20);
-        camera.lookAt(new THREE.Vector3(0, 0, 0));
-    }
-    
-    // Oyunu durdur
-    isGameRunning = false;
-    
-    console.log('Game stopped');
 }
 
-// Diğer oyuncuyu ekle
-function addOtherPlayer(playerData) {
-    const otherPlayer = new Aircraft({
-        id: playerData.id,
-        name: playerData.name,
-        type: playerData.type || 'fighter',
-        position: new THREE.Vector3(
-            playerData.position ? playerData.position.x : 0,
-            playerData.position ? playerData.position.y : 100,
-            playerData.position ? playerData.position.z : 0
-        ),
-        scene: scene,
-        physics: physics,
-        effects: effects,
-        isRemote: true
+function updateUI() {
+    if (!ui || !aircraft || !localPlayer) return;
+    
+    // Uçuş verilerini güncelle
+    const position = aircraft.getPosition();
+    const altitude = Math.max(0, Math.round(position.y));
+    const speed = Math.round(aircraft.getSpeed() * 3.6); // m/s to km/h
+    const verticalSpeed = Math.round(aircraft.getVerticalSpeed());
+    
+    ui.updateFlightData({
+        altitude: altitude,
+        speed: speed,
+        verticalSpeed: verticalSpeed
     });
     
-    scene.add(otherPlayer.getMesh());
-    otherPlayers.set(playerData.id, otherPlayer);
+    // Silah bilgilerini güncelle
+    ui.updateAmmoCounter({
+        current: aircraft.getAmmo ? aircraft.getAmmo() : 100,
+        max: aircraft.getMaxAmmo ? aircraft.getMaxAmmo() : 100
+    });
+    
+    // Radar güncelle
+    const radarTargets = enemies.map(enemy => {
+        if (enemy && enemy.aircraft && enemy.aircraft.getPosition) {
+            return {
+                position: enemy.aircraft.getPosition(),
+                team: 'red',
+                type: 'enemy'
+            };
+        }
+        return null;
+    }).filter(target => target !== null);
+    
+    ui.updateRadar(position, radarTargets);
+    
+    // Skorboard
+    const players = [
+        {
+            id: 'local-player',
+            name: 'You',
+            score: localPlayer.getScore?.() || 0,
+            kills: localPlayer.getKills?.() || 0,
+            deaths: localPlayer.getDeaths?.() || 0,
+            team: 'blue'
+        }
+    ];
+    
+    enemies.forEach((enemy, index) => {
+        players.push({
+            id: `enemy-${index}`,
+            name: `Enemy ${index+1}`,
+            score: enemy.getScore?.() || 0,
+            kills: enemy.getKills?.() || 0,
+            deaths: enemy.getDeaths?.() || 0,
+            team: 'red'
+        });
+    });
+    
+    ui.updateScoreTable(players);
 }
 
-// Diğer oyuncuyu kaldır
-function removeOtherPlayer(playerId) {
-    const player = otherPlayers.get(playerId);
-    if (player) {
-        scene.remove(player.getMesh());
-        otherPlayers.delete(playerId);
-    }
+function toggleCameraView() {
+    const views = ['cockpit', 'follow', 'free'];
+    const currentIndex = views.indexOf(cameraView);
+    const nextIndex = (currentIndex + 1) % views.length;
+    cameraView = views[nextIndex];
+    
+    console.log(`Camera view changed to: ${cameraView}`);
+    
+    // Kamera pozisyonunu hemen güncelle
+    updateCamera();
 }
 
-// Diğer oyuncuyu güncelle
-function updateOtherPlayer(playerData) {
-    const player = otherPlayers.get(playerData.id);
-    if (player) {
-        player.setTargetPosition(new THREE.Vector3(
-            playerData.position.x,
-            playerData.position.y,
-            playerData.position.z
-        ));
-        player.setTargetRotation(new THREE.Euler(
-            playerData.rotation.x,
-            playerData.rotation.y,
-            playerData.rotation.z
-        ));
-        player.setSpeed(playerData.speed);
+function updateCamera() {
+    if (!aircraft || !aircraft.mesh) return;
+    
+    const position = aircraft.getPosition();
+    const rotation = aircraft.getRotation();
+    const quaternion = aircraft.getQuaternion();
+    
+    switch (cameraView) {
+        case 'cockpit':
+            // Kokpit görünümü
+            const cockpitOffset = new THREE.Vector3(0, 1, 0.5);
+            const worldOffset = cockpitOffset.clone().applyQuaternion(quaternion);
+            camera.position.copy(position).add(worldOffset);
+            camera.quaternion.copy(quaternion);
+            break;
+            
+        case 'follow':
+            // Takip kamerası
+            const followOffset = new THREE.Vector3(0, 5, -15);
+            const followWorldOffset = followOffset.clone().applyQuaternion(quaternion);
+            camera.position.copy(position).add(followWorldOffset);
+            camera.lookAt(position);
+            break;
+            
+        case 'free':
+            // Controls kamerası (kullanıcı kontrolleri)
+            if (!orbitControls) {
+                orbitControls = new THREE.OrbitControls(camera, renderer.domElement);
+                orbitControls.target.copy(position);
+                orbitControls.minDistance = 10;
+                orbitControls.maxDistance = 100;
+                orbitControls.enableDamping = true;
+                orbitControls.dampingFactor = 0.05;
+            }
+            
+            orbitControls.target.copy(position);
+            orbitControls.update();
+            break;
     }
 }
 
@@ -901,14 +751,26 @@ function handleConnect() {
 
 function handleDisconnect() {
     console.log('Disconnected from server');
-    stopGame();
-    ui.showLoginScreen();
+    // Oyunu durdur
+    isGameActive = false;
+    window.isGameActive = false;
+    
+    if (ui) {
+        ui.showLoginScreen();
+    }
 }
 
 function handleLoginSuccess(userData) {
     console.log('Login successful', userData);
     
     try {
+        // Login butonunu resetle
+        const loginButton = document.getElementById('login-btn');
+        if (loginButton) {
+            loginButton.innerText = 'Login';
+            loginButton.disabled = false;
+        }
+        
         // Kullanıcı adını UI'da göster
         if (ui && ui.updatePlayerName) {
             ui.updatePlayerName(userData.username);
@@ -921,57 +783,63 @@ function handleLoginSuccess(userData) {
             }
         }
         
-        // Eğer oyun zaten çalışıyorsa ve aynı kullanıcı ise, tekrar başlatma
-        if (isGameRunning && currentPlayer && currentPlayer.id === userData.id) {
-            console.log('Game is already running with the same user, not restarting');
-            return;
+        // Tüm ekranları gizle
+        if (ui && ui.hideAllScreens) {
+            console.log('Hiding all UI screens');
+            ui.hideAllScreens();
+        } else {
+            console.error('UI or hideAllScreens method is not available');
+            // Doğrudan DOM manipülasyonu
+            document.querySelectorAll('.screen').forEach(screen => {
+                screen.classList.add('hidden');
+            });
         }
         
-        // Sunucudan gelen oda bilgisi varsa kullan
-        if (userData.room) {
-            console.log('Using room data from server:', userData.room);
-            
-            // Oyuncu verisini oluştur
-            const playerData = {
-                id: userData.id,
-                username: userData.username,
-                position: { x: 0, y: 100, z: 0 },
-                rotation: { x: 0, y: 0, z: 0 },
-                team: 'blue'
-            };
-            
-            // Oyunu başlat
-            startGame(playerData, userData.room);
-        } else {
-            // Sunucudan oda bilgisi gelmezse varsayılan değerleri kullan
-            console.log('Starting game with default room data');
-            
-            // Varsayılan oyuncu ve oda verileri oluştur
-            const defaultPlayerData = {
-                id: userData.id,
-                username: userData.username,
-                position: { x: 0, y: 100, z: 0 },
-                rotation: { x: 0, y: 0, z: 0 },
-                team: 'blue'
-            };
-            
-            const defaultRoomData = {
-                id: 'default-room',
-                name: 'Default Game Room',
-                gameMode: 'free-flight',
-                players: [defaultPlayerData]
-            };
-            
-            // Oyunu başlat
-            startGame(defaultPlayerData, defaultRoomData);
+        // Oyun ekranını göster
+        console.log('Showing game UI');
+        const uiContainer = document.getElementById('ui-container');
+        if (uiContainer) {
+            uiContainer.style.display = 'block';
+        }
+        
+        // Oyunu aktif et
+        console.log('Activating game');
+        isGameActive = true;
+        window.isGameActive = true;
+        
+        console.log('Game activated successfully after login');
+        
+        // Efektler için bildirim
+        if (effects) {
+            effects.showMessage('Welcome, ' + userData.username + '!', 'success');
         }
     } catch (error) {
         console.error('Error in handleLoginSuccess:', error);
+        
+        // Hata durumunda fallback
+        alert('An error occurred while starting the game. Trying emergency start...');
+        
+        // Tüm ekranları gizle - doğrudan DOM manipülasyonu
+        document.querySelectorAll('.screen').forEach(screen => {
+            screen.classList.add('hidden');
+        });
+        
+        // Oyunu aktif et
+        isGameActive = true;
+        window.isGameActive = true;
     }
 }
 
 function handleLoginError(error) {
     console.error('Login error:', error);
+    
+    // Login butonunu resetle
+    const loginButton = document.getElementById('login-btn');
+    if (loginButton) {
+        loginButton.innerText = 'Login';
+        loginButton.disabled = false;
+    }
+    
     alert('Login failed. Please try again later.');
 }
 
@@ -979,7 +847,7 @@ function handlePlayerJoin(playerData) {
     console.log('Player joined:', playerData);
     ui.addChatMessage(`${playerData.name} joined the game`, 'system');
     
-    if (isGameRunning) {
+    if (isGameActive) {
         addOtherPlayer(playerData);
     }
     
@@ -996,7 +864,7 @@ function handlePlayerLeave(playerData) {
     console.log('Player left:', playerData);
     ui.addChatMessage(`${playerData.name} left the game`, 'system');
     
-    if (isGameRunning) {
+    if (isGameActive) {
         removeOtherPlayer(playerData.id);
     }
     

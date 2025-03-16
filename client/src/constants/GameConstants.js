@@ -152,9 +152,10 @@ export const GameConstants = {
     NETWORK: {
         UPDATE_RATE: 60, // ms
         INTERPOLATION_DELAY: 100, // ms
-        SERVER_URL: process.env.NODE_ENV === 'production' 
-            ? 'https://ucak-simulasyonu.vercel.app' 
-            : 'http://localhost:3000'
+        // Tarayıcı ortamında çalışacak şekilde düzeltildi
+        SERVER_URL: window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1'
+            ? 'http://localhost:3000'
+            : 'https://ucak-simulasyonu.vercel.app'
     },
     
     // UI sabitleri

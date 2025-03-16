@@ -26,7 +26,10 @@ export class Projectile {
         
         // Pozisyon ve yön
         this.position = options.position.clone();
-        this.direction = options.direction.clone().normalize();
+        this.direction = options.direction || new THREE.Vector3(0, 0, 1);
+        
+        // Mermi atış yönü
+        this.useForwardDirection = true;
         
         // Raycaster
         this.raycaster = new THREE.Raycaster(
@@ -47,30 +50,85 @@ export class Projectile {
      * Mermiyi oluştur
      */
     createProjectile() {
-        // Mermi geometrisi
-        const geometry = new THREE.CylinderGeometry(0.05, 0.05, 0.5, 8);
-        geometry.rotateX(Math.PI / 2); // Yatay döndür
-        
-        // Mermi materyali
-        const material = new THREE.MeshBasicMaterial({
-            color: this.team === 'red' ? 0xff0000 : this.team === 'blue' ? 0x0000ff : 0xffff00,
-            emissive: this.team === 'red' ? 0xff0000 : this.team === 'blue' ? 0x0000ff : 0xffff00,
-            emissiveIntensity: 0.5
-        });
-        
-        // Mermi mesh'i
-        this.mesh = new THREE.Mesh(geometry, material);
-        this.mesh.position.copy(this.position);
-        
-        // Mermiyi yöne doğru döndür
-        this.mesh.lookAt(this.position.clone().add(this.direction));
-        
-        // Sahneye ekle
-        this.scene.add(this.mesh);
-        
-        // İz efekti oluştur
-        if (this.effects) {
-            this.effects.createTrailEffect(this.position, this.direction);
+        try {
+            console.log('Creating projectile');
+            
+            // Eğer THREE yüklü değilse hata fırlat
+            if (typeof THREE === 'undefined') {
+                console.error('THREE is not defined. Make sure Three.js is loaded.');
+                throw new Error('THREE is not defined');
+            }
+            
+            // Ön tanımlı değerler
+            const radius = this.options.radius || 0.2;
+            const color = this.options.color || 0xff0000;
+            const speed = this.options.speed || 50;
+            
+            // Mermi geometrisi ve materyali
+            const geometry = new THREE.SphereGeometry(radius, 8, 8);
+            const material = new THREE.MeshBasicMaterial({
+                color: color,
+                emissive: color,
+                emissiveIntensity: 0.5
+            });
+            
+            // Mermi mesh'i oluştur
+            this.mesh = new THREE.Mesh(geometry, material);
+            this.mesh.position.copy(this.position);
+            
+            // Sahneye ekle
+            if (this.scene) {
+                this.scene.add(this.mesh);
+            }
+            
+            // Mermi yörüngesi için ışık izi
+            if (this.options.createTrail) {
+                const trailGeometry = new THREE.CylinderGeometry(0.05, 0.05, 1, 8);
+                const trailMaterial = new THREE.MeshBasicMaterial({
+                    color: 0xffff00,
+                    transparent: true,
+                    opacity: 0.7
+                });
+                this.trail = new THREE.Mesh(trailGeometry, trailMaterial);
+                this.trail.position.copy(this.position);
+                
+                // İzi doğru yönlendir
+                if (this.useForwardDirection && this.ownerObject && this.ownerObject.getQuaternion) {
+                    // Uçağın yönünü kullan
+                    const quaternion = this.ownerObject.getQuaternion();
+                    this.direction = new THREE.Vector3(0, 0, 1).applyQuaternion(quaternion);
+                }
+                
+                // İzi yönlendir
+                this.trail.quaternion.setFromUnitVectors(
+                    new THREE.Vector3(0, 1, 0),
+                    this.direction.clone().normalize()
+                );
+                
+                if (this.scene) {
+                    this.scene.add(this.trail);
+                }
+            }
+            
+            // Işık efekti ekle
+            if (this.options.addLight) {
+                const light = new THREE.PointLight(color, 1, 10);
+                light.position.copy(this.position);
+                this.light = light;
+                
+                if (this.scene) {
+                    this.scene.add(this.light);
+                }
+            }
+            
+            // Mermi ID ve bilgilerini ekle
+            this.mesh.userData.projectileId = this.id;
+            this.mesh.userData.ownerId = this.ownerId;
+            
+            console.log('Projectile created successfully');
+        } catch (error) {
+            console.error('Error creating projectile:', error);
+            throw error;
         }
     }
     

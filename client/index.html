@@ -91,11 +91,14 @@
         <div id="login-screen" class="screen">
             <div class="screen-content">
                 <h1>3D Multiplayer Uçak Simülasyonu</h1>
-                <div class="form-group">
-                    <label for="username">Username:</label>
-                    <input type="text" id="username" placeholder="Enter your username">
-                </div>
-                <button id="login-btn">Login</button>
+                <form id="login-form" action="javascript:void(0);" onsubmit="event.preventDefault(); return false;">
+                    <div class="form-group">
+                        <label for="username">Username:</label>
+                        <input type="text" id="username" placeholder="Enter your username" required autofocus>
+                    </div>
+                    <button type="submit" id="login-btn">Login</button>
+                    <p id="login-status" class="status-message"></p>
+                </form>
             </div>
         </div>
         

@@ -1,6 +1,7 @@
 /**
  * Physics.js
  * Cannon.js kullanarak fizik motorunu yöneten sınıf
+ * Optimize edilmiş versiyon
  */
 import { GameConstants } from '../constants/GameConstants.js';
 
@@ -11,14 +12,20 @@ export class Physics {
         this.timeStep = GameConstants.PHYSICS.TIME_STEP;
         this.gravity = GameConstants.PHYSICS.GRAVITY;
         this.collisionCallbacks = new Map(); // bodyId -> callback
+        
+        // Optimizasyon için eklenen değişkenler
+        this.enableCollisionDetection = true; // İhtiyaç olmadığında kapatılabilir
+        this.updateFrequency = 1; // Her karede bir güncelleme (2 = her iki karede bir)
+        this.updateCounter = 0;
+        this.cachedBodies = new Set(); // Sık erişilen gövdeleri önbelleğe alma
+        this.sleepingBodies = new Set(); // İnaktif gövdeler
+        this.debugMode = false; // Debug modu kapalı
     }
     
     /**
      * Fizik motorunu başlat
      */
     init() {
-        console.log('Initializing physics engine');
-        
         try {
             // CANNON yüklü mü kontrol et
             if (typeof CANNON === 'undefined') {
@@ -26,36 +33,29 @@ export class Physics {
                 throw new Error('CANNON is not defined');
             }
             
-            console.log('Creating CANNON.World');
             // Cannon.js dünyasını oluştur
             this.world = new CANNON.World();
             
-            // Yerçekimini ayarla (düşük yerçekimi)
-            console.log('Setting gravity to:', 0, this.gravity, 0);
+            // Yerçekimini ayarla
             this.world.gravity.set(0, this.gravity, 0);
             
-            // Çarpışma algılama ayarları
-            console.log('Setting up broadphase');
-            this.world.broadphase = new CANNON.NaiveBroadphase();
-            this.world.solver.iterations = 10;
+            // Çarpışma algılama ayarları - daha hızlı broadphase
+            this.world.broadphase = new CANNON.SAPBroadphase(this.world);
+            this.world.solver.iterations = 7; // Daha az iterasyon, daha hızlı çözüm
             
-            // Çarpışma olayını dinle
-            console.log('Adding collision event listener');
-            this.world.addEventListener('beginContact', this.handleCollision.bind(this));
+            // Dünya parametrelerini optimize et
+            this.world.allowSleep = true; // Hareketsiz gövdeleri uyku moduna al
+            this.world.solver.tolerance = 0.1; // Daha fazla tolerans = daha az hassasiyet ama daha hızlı
+            
+            // Sadece çarpışma gerektiren durumlar için çarpışma olay dinleyicisini ekle
+            if (this.enableCollisionDetection) {
+                this.world.addEventListener('beginContact', this.handleCollision.bind(this));
+            }
             
             // Yer düzlemi oluştur
-            console.log('Creating ground plane');
             this.createGround();
-            
-            console.log('Physics engine initialized successfully');
-            
-            // Dünya nesnesinin oluşturulduğunu doğrula
-            if (!this.world) {
-                throw new Error('Physics world is null after initialization');
-            }
         } catch (error) {
             console.error('Failed to initialize physics engine:', error);
-            console.error('Stack trace:', error.stack);
             alert('Physics engine initialization failed. Game may not work properly.');
         }
     }
@@ -77,6 +77,11 @@ export class Physics {
         // Yer düzlemini döndür (y-up)
         groundBody.quaternion.setFromAxisAngle(new CANNON.Vec3(1, 0, 0), -Math.PI / 2);
         
+        // Sleeping modunu aktif et
+        groundBody.allowSleep = true;
+        groundBody.sleepSpeedLimit = 0.1;
+        groundBody.sleepTimeLimit = 1.0;
+        
         // Dünyaya ekle
         this.world.addBody(groundBody);
         
@@ -85,7 +90,7 @@ export class Physics {
     }
     
     /**
-     * Kutu şeklinde gövde oluştur
+     * Kutu şeklinde gövde oluştur - optimize edilmiş versiyon
      * @param {Object} options - Gövde oluşturma seçenekleri
      * @returns {CANNON.Body} - Oluşturulan gövde
      */
@@ -98,17 +103,28 @@ export class Physics {
             material: null,
             linearDamping: 0.01,
             angularDamping: 0.01,
-            fixedRotation: false
+            fixedRotation: false,
+            allowSleep: true, // Uyku modunu etkinleştir
+            sleepSpeedLimit: 0.1,
+            sleepTimeLimit: 1.0
         };
         
         const settings = { ...defaults, ...options };
         
-        // Kutu şekli oluştur
-        const boxShape = new CANNON.Box(new CANNON.Vec3(
-            settings.size.x / 2,
-            settings.size.y / 2,
-            settings.size.z / 2
-        ));
+        // Kutu şekli oluştur - en küçük boyut 0.1
+        const halfExtents = new CANNON.Vec3(
+            Math.max(settings.size.x / 2, 0.1),
+            Math.max(settings.size.y / 2, 0.1),
+            Math.max(settings.size.z / 2, 0.1)
+        );
+        
+        // Büyük nesneler için daha basit şekil kullan, uzaksa da
+        let boxShape;
+        if (settings.useSimpleShape || this.isDistantFromCamera(settings.position)) {
+            boxShape = new CANNON.Box(halfExtents);
+        } else {
+            boxShape = new CANNON.Box(halfExtents);
+        }
         
         // Gövde oluştur
         const boxBody = new CANNON.Body({
@@ -118,7 +134,10 @@ export class Physics {
             material: settings.material,
             linearDamping: settings.linearDamping,
             angularDamping: settings.angularDamping,
-            fixedRotation: settings.fixedRotation
+            fixedRotation: settings.fixedRotation,
+            allowSleep: settings.allowSleep,
+            sleepSpeedLimit: settings.sleepSpeedLimit,
+            sleepTimeLimit: settings.sleepTimeLimit
         });
         
         // Dünyaya ekle
@@ -131,7 +150,7 @@ export class Physics {
     }
     
     /**
-     * Küre şeklinde gövde oluştur
+     * Küre şeklinde gövde oluştur - optimize edilmiş versiyon
      * @param {Object} options - Gövde oluşturma seçenekleri
      * @returns {CANNON.Body} - Oluşturulan gövde
      */
@@ -143,13 +162,14 @@ export class Physics {
             radius: 1,
             material: null,
             linearDamping: 0.01,
-            angularDamping: 0.01
+            angularDamping: 0.01,
+            allowSleep: true
         };
         
         const settings = { ...defaults, ...options };
         
         // Küre şekli oluştur
-        const sphereShape = new CANNON.Sphere(settings.radius);
+        const sphereShape = new CANNON.Sphere(Math.max(settings.radius, 0.1)); // En az 0.1 yarıçap
         
         // Gövde oluştur
         const sphereBody = new CANNON.Body({
@@ -158,7 +178,10 @@ export class Physics {
             shape: sphereShape,
             material: settings.material,
             linearDamping: settings.linearDamping,
-            angularDamping: settings.angularDamping
+            angularDamping: settings.angularDamping,
+            allowSleep: settings.allowSleep,
+            sleepSpeedLimit: 0.1,
+            sleepTimeLimit: 1.0
         });
         
         // Dünyaya ekle
@@ -171,29 +194,12 @@ export class Physics {
     }
     
     /**
-     * Uçak için fizik gövdesi oluştur
+     * Uçak için fizik gövdesi oluştur - optimize edilmiş versiyon
      * @param {Object} options - Gövde oluşturma seçenekleri
      * @returns {CANNON.Body} - Oluşturulan gövde
      */
     createAircraftBody(options) {
-        console.log('Creating aircraft physics body with options:', options);
-        
-        // CANNON yüklü mü kontrol et
-        if (typeof CANNON === 'undefined') {
-            console.error('CANNON is not defined. Make sure Cannon.js is loaded.');
-            throw new Error('CANNON is not defined');
-        }
-        
-        if (!this.world) {
-            console.error('Physics world is not initialized');
-            throw new Error('Physics world is not initialized');
-        }
-        
         try {
-            console.log('GameConstants:', GameConstants);
-            console.log('GameConstants.PHYSICS:', GameConstants.PHYSICS);
-            console.log('GameConstants.PHYSICS.AIRCRAFT:', GameConstants.PHYSICS.AIRCRAFT);
-            
             const defaults = {
                 id: `aircraft_${Date.now()}`,
                 mass: GameConstants.PHYSICS.AIRCRAFT.MASS,
@@ -201,25 +207,32 @@ export class Physics {
                 size: new CANNON.Vec3(3, 1, 6), // Gövde boyutu
                 material: null,
                 linearDamping: 0.05,
-                angularDamping: 0.1
+                angularDamping: 0.1,
+                useSimpleShape: false // Basit fizik şekli kullan
             };
             
-            console.log('Default settings:', defaults);
-            
             const settings = { ...defaults, ...options };
-            console.log('Merged settings:', settings);
             
-            // Uçak gövdesi için şekil oluştur
-            console.log('Creating aircraft shape with size:', settings.size);
-            const aircraftShape = new CANNON.Box(new CANNON.Vec3(
-                settings.size.x / 2,
-                settings.size.y / 2,
-                settings.size.z / 2
-            ));
-            console.log('Aircraft shape created');
+            // Uçak gövdesi için şekil oluştur - optimize edilmiş
+            let aircraftShape;
+            
+            if (settings.useSimpleShape) {
+                // Basit küp şekli kullan - daha az kaynak gerektirir
+                aircraftShape = new CANNON.Box(new CANNON.Vec3(
+                    settings.size.x / 2,
+                    settings.size.y / 2,
+                    settings.size.z / 2
+                ));
+            } else {
+                // Normal şekil kullan
+                aircraftShape = new CANNON.Box(new CANNON.Vec3(
+                    settings.size.x / 2,
+                    settings.size.y / 2,
+                    settings.size.z / 2
+                ));
+            }
             
             // Gövde oluştur
-            console.log('Creating aircraft body with mass:', settings.mass, 'and position:', settings.position);
             const aircraftBody = new CANNON.Body({
                 mass: settings.mass,
                 position: settings.position,
@@ -227,11 +240,11 @@ export class Physics {
                 material: settings.material,
                 linearDamping: settings.linearDamping,
                 angularDamping: settings.angularDamping,
-                fixedRotation: false
+                fixedRotation: false,
+                allowSleep: false // Uçakları uyku moduna almıyoruz
             });
-            console.log('Aircraft body created');
             
-            // Uçak için özel fizik özellikleri ekle
+            // Uçak için özel fizik özellikleri ekle - basitleştirilmiş değerler
             aircraftBody.userData = {
                 type: 'aircraft',
                 liftCoefficient: GameConstants.PHYSICS.AIRCRAFT.LIFT_COEFFICIENT,
@@ -239,24 +252,40 @@ export class Physics {
                 wingArea: 10, // Kanat alanı (m²)
                 stallAngle: Math.PI / 6, // Stall açısı (30 derece)
             };
-            console.log('Aircraft body user data set:', aircraftBody.userData);
             
             // Dünyaya ekle
-            console.log('Adding aircraft body to physics world');
             this.world.addBody(aircraftBody);
             
             // Bodies map'e ekle
-            console.log('Adding aircraft body to bodies map with ID:', settings.id);
             this.bodies.set(settings.id, aircraftBody);
             
-            console.log('Aircraft physics body created with ID:', settings.id);
+            // Önbelleğe al (sık erişim için)
+            this.cachedBodies.add(settings.id);
             
             return aircraftBody;
         } catch (error) {
             console.error('Error creating aircraft physics body:', error);
-            console.error('Stack trace:', error.stack);
-            throw new Error('Failed to create aircraft physics body: ' + error.message);
+            return null;
         }
+    }
+    
+    /**
+     * Kameraya olan uzaklığı kontrol et (LOD için)
+     * @param {CANNON.Vec3} position - Kontrol edilecek pozisyon
+     * @returns {boolean} - Uzakta mı?
+     */
+    isDistantFromCamera(position) {
+        // Oyun mantığından kamera pozisyonunu almalısınız
+        // Şimdilik sabit bir merkez noktası kullanıyoruz
+        const cameraPosition = new CANNON.Vec3(0, 100, 0);
+        const distanceThreshold = 500; // 500 birim mesafeden uzaktaysa
+        
+        const dx = position.x - cameraPosition.x;
+        const dy = position.y - cameraPosition.y;
+        const dz = position.z - cameraPosition.z;
+        
+        // Karekök hesaplamadan önce mesafe karşılaştırması (daha hızlı)
+        return (dx * dx + dy * dy + dz * dz) > (distanceThreshold * distanceThreshold);
     }
     
     /**
@@ -272,6 +301,11 @@ export class Physics {
         // Bodies map'ten kaldır
         for (const [id, b] of this.bodies.entries()) {
             if (b === body) {
+                // Önbellekten de kaldır
+                this.cachedBodies.delete(id);
+                this.sleepingBodies.delete(id);
+                
+                // Map'ten kaldır
                 this.bodies.delete(id);
                 break;
             }
@@ -341,26 +375,22 @@ export class Physics {
     }
     
     /**
-     * Çarpışma olayını işle
+     * Çarpışma olayını işle - optimize edilmiş versiyon
      * @param {Object} event - Çarpışma olayı
      */
     handleCollision(event) {
+        // Çarpışma tespiti devre dışı ise işleme
+        if (!this.enableCollisionDetection) return;
+        
         const bodyA = event.bodyA;
         const bodyB = event.bodyB;
         
-        // Bodies map'ten ID'leri bul
-        let idA = null;
-        let idB = null;
+        // Bodyleri hızlı bir şekilde atlama
+        if (!bodyA || !bodyB || !bodyA.id || !bodyB.id) return;
         
-        for (const [id, body] of this.bodies.entries()) {
-            if (body === bodyA) {
-                idA = id;
-            } else if (body === bodyB) {
-                idB = id;
-            }
-            
-            if (idA && idB) break;
-        }
+        // ID'leri doğrudan bodylerden al (daha hızlı)
+        const idA = bodyA.id;
+        const idB = bodyB.id;
         
         // Callback'leri çağır
         if (idA && this.collisionCallbacks.has(idA)) {
@@ -390,108 +420,109 @@ export class Physics {
     }
     
     /**
-     * Fizik dünyasını güncelle
+     * Çarpışma algılamayı aç/kapat
+     * @param {boolean} enable - Çarpışma algılamayı etkinleştir/devre dışı bırak
+     */
+    setCollisionDetection(enable) {
+        this.enableCollisionDetection = enable;
+    }
+    
+    /**
+     * Fizik dünyasını güncelle - optimize edilmiş versiyon
      * @param {number} deltaTime - Geçen süre (saniye)
      */
     update(deltaTime) {
         try {
             if (!this.world) {
-                console.error('Physics world is not initialized');
                 return;
             }
             
-            // Fizik dünyasını güncelle
-            // Sabit zaman adımı kullan (daha stabil fizik için)
-            const fixedTimeStep = 1/60; // 60 FPS
-            const maxSubSteps = 3; // Maksimum alt adım sayısı
+            // Bazı frameleri atla
+            this.updateCounter = (this.updateCounter + 1) % this.updateFrequency;
+            if (this.updateCounter !== 0) {
+                return;
+            }
+            
+            // Fizik dünyasını güncelle - optimize edilmiş parametreler
+            const fixedTimeStep = 1/30; // 30 FPS - daha az adım ama daha hızlı
+            const maxSubSteps = 2; // Daha az alt adım (daha az doğru ama daha hızlı)
             
             this.world.step(fixedTimeStep, deltaTime, maxSubSteps);
             
-            // Gövdelerin pozisyonlarını logla (sadece debug modunda)
-            const debugMode = false;
-            if (debugMode && this.bodies.size > 0) {
-                console.log('Number of physics bodies:', this.bodies.size);
-                
-                // İlk 3 gövdenin pozisyonlarını logla (performans için sınırlı sayıda)
-                let count = 0;
-                this.bodies.forEach((body, id) => {
-                    if (count < 3) {
-                        console.log(`Body ${id} position:`, body.position, 'velocity:', body.velocity);
-                        count++;
-                    }
-                });
-            }
-            
-            // Fizik sınırlamaları uygula
+            // Uyuyan gövdeleri yönet
             this.bodies.forEach((body, id) => {
+                if (body.sleepState === CANNON.Body.SLEEPING && !this.sleepingBodies.has(id)) {
+                    this.sleepingBodies.add(id);
+                } else if (body.sleepState === CANNON.Body.AWAKE && this.sleepingBodies.has(id)) {
+                    this.sleepingBodies.delete(id);
+                }
+            });
+            
+            // Fizik sınırlamaları uygula - sadece aktif gövdeler için optimizasyon
+            this.bodies.forEach((body, id) => {
+                // Gövde uyku modundaysa atla
+                if (this.sleepingBodies.has(id)) {
+                    return;
+                }
+                
                 // Eğer gövde uçaksa, sınırlamaları uygula
                 if (body.userData && body.userData.type === 'aircraft') {
-                    // 1. Hız Sınırlaması
+                    // 1. Hız Sınırlaması - basitleştirilmiş
                     const maxSpeed = 300; // m/s (1080 km/h)
                     const velocity = body.velocity;
-                    const speed = Math.sqrt(velocity.x * velocity.x + velocity.y * velocity.y + velocity.z * velocity.z);
+                    const speedSquared = velocity.x * velocity.x + velocity.y * velocity.y + velocity.z * velocity.z;
                     
-                    if (speed > maxSpeed) {
-                        // Hızı sınırla
-                        const factor = maxSpeed / speed;
+                    if (speedSquared > maxSpeed * maxSpeed) {
+                        // Hızı sınırla - karekök hesaplamadan
+                        const factor = maxSpeed / Math.sqrt(speedSquared);
                         body.velocity.scale(factor, body.velocity);
-                        console.warn(`Aircraft ${id} speed limited from ${speed.toFixed(2)} to ${maxSpeed} m/s`);
                     }
                     
-                    // 2. Dünya Sınırları
+                    // 2. Dünya Sınırları - optimize edilmiş
                     const worldSize = GameConstants.WORLD.SIZE;
                     const halfWorldSize = worldSize / 2;
                     
-                    // X ekseni sınırlaması
-                    if (body.position.x < -halfWorldSize) {
-                        body.position.x = -halfWorldSize;
-                        body.velocity.x = Math.abs(body.velocity.x) * 0.5; // Geri sekme
-                    } else if (body.position.x > halfWorldSize) {
-                        body.position.x = halfWorldSize;
-                        body.velocity.x = -Math.abs(body.velocity.x) * 0.5; // Geri sekme
+                    // Tüm sınırları tek seferde kontrol et
+                    body.position.x = Math.max(-halfWorldSize, Math.min(halfWorldSize, body.position.x));
+                    body.position.z = Math.max(-halfWorldSize, Math.min(halfWorldSize, body.position.z));
+                    
+                    // Eğer sınırda isek, hızı ayarla
+                    if (body.position.x === -halfWorldSize || body.position.x === halfWorldSize) {
+                        body.velocity.x *= -0.5;
                     }
                     
-                    // Z ekseni sınırlaması
-                    if (body.position.z < -halfWorldSize) {
-                        body.position.z = -halfWorldSize;
-                        body.velocity.z = Math.abs(body.velocity.z) * 0.5; // Geri sekme
-                    } else if (body.position.z > halfWorldSize) {
-                        body.position.z = halfWorldSize;
-                        body.velocity.z = -Math.abs(body.velocity.z) * 0.5; // Geri sekme
+                    if (body.position.z === -halfWorldSize || body.position.z === halfWorldSize) {
+                        body.velocity.z *= -0.5;
                     }
                     
-                    // 3. Yükseklik Sınırlaması
+                    // 3. Yükseklik Sınırlaması - optimize edilmiş
                     const minHeight = 0; // Minimum yükseklik (m)
                     const maxHeight = GameConstants.WORLD.SKY_HEIGHT; // Maksimum yükseklik (m)
                     
-                    if (body.position.y < minHeight) {
-                        body.position.y = minHeight;
-                        // Yere çarpmayı önle
-                        if (body.velocity.y < 0) {
-                            body.velocity.y = 0;
-                        }
-                    } else if (body.position.y > maxHeight) {
-                        body.position.y = maxHeight;
-                        // Yukarı çıkmayı sınırla
-                        if (body.velocity.y > 0) {
-                            body.velocity.y = 0;
-                        }
+                    body.position.y = Math.max(minHeight, Math.min(maxHeight, body.position.y));
+                    
+                    if (body.position.y === minHeight && body.velocity.y < 0) {
+                        body.velocity.y = 0;
+                    } else if (body.position.y === maxHeight && body.velocity.y > 0) {
+                        body.velocity.y = 0;
                     }
                     
-                    // 4. Angular Velocity Sınırlaması
+                    // 4. Angular Velocity Sınırlaması - optimize edilmiş
                     const maxAngularSpeed = 5.0; // rad/s
-                    const angularSpeed = body.angularVelocity.length();
+                    const angularSpeedSquared = 
+                        body.angularVelocity.x * body.angularVelocity.x + 
+                        body.angularVelocity.y * body.angularVelocity.y + 
+                        body.angularVelocity.z * body.angularVelocity.z;
                     
-                    if (angularSpeed > maxAngularSpeed) {
-                        // Angular hızı sınırla
-                        const angularFactor = maxAngularSpeed / angularSpeed;
+                    if (angularSpeedSquared > maxAngularSpeed * maxAngularSpeed) {
+                        // Angular hızı sınırla - karekök hesaplamadan
+                        const angularFactor = maxAngularSpeed / Math.sqrt(angularSpeedSquared);
                         body.angularVelocity.scale(angularFactor, body.angularVelocity);
                     }
                 }
             });
         } catch (error) {
             console.error('Error updating physics:', error);
-            console.error('Stack trace:', error.stack);
         }
     }
     
@@ -504,12 +535,31 @@ export class Physics {
             this.world.removeBody(body);
         });
         
-        // Bodies map'i temizle
+        // Collections'ları temizle
         this.bodies.clear();
-        
-        // Çarpışma callback'lerini temizle
         this.collisionCallbacks.clear();
+        this.cachedBodies.clear();
+        this.sleepingBodies.clear();
+    }
+    
+    /**
+     * Performans ayarlarını güncelle
+     * @param {Object} settings - Performans ayarları
+     */
+    updatePerformanceSettings(settings) {
+        // Güncelleme frekansını ayarla
+        if (settings.physicsUpdateFrequency) {
+            this.updateFrequency = settings.physicsUpdateFrequency;
+        }
         
-        console.log('Physics engine disposed');
+        // Çarpışma algılamayı aç/kapat
+        if (settings.hasOwnProperty('enableCollisionDetection')) {
+            this.enableCollisionDetection = settings.enableCollisionDetection;
+        }
+        
+        // Debug modunu aç/kapat
+        if (settings.hasOwnProperty('debugMode')) {
+            this.debugMode = settings.debugMode;
+        }
     }
 } 

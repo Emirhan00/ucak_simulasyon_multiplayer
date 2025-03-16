@@ -1,6 +1,7 @@
 /**
  * Aircraft.js
  * Uçak sınıfı, uçak fiziği ve kontrollerini yönetir
+ * Optimize edilmiş versiyon
  */
 import { GameConstants } from '../constants/GameConstants.js';
 import { EngineSystem } from './EngineSystem.js';
@@ -8,18 +9,6 @@ import { EngineSystem } from './EngineSystem.js';
 export class Aircraft {
     constructor(options) {
         try {
-            // THREE yüklü mü kontrol et
-            if (typeof THREE === 'undefined') {
-                console.error('THREE is not defined. Make sure Three.js is loaded.');
-                throw new Error('THREE is not defined');
-            }
-            
-            // Options kontrolü
-            if (!options) {
-                console.error('Aircraft options not provided');
-                throw new Error('Aircraft options not provided');
-            }
-            
             // Varsayılan değerler
             this.id = options.id || `aircraft_${Date.now()}`;
             this.name = options.name || 'Aircraft';
@@ -48,886 +37,293 @@ export class Aircraft {
             this.score = 0;
             this.kills = 0;
             this.deaths = 0;
-            this.balloonCount = 0;
-            this.isStalling = false;
             
-            // Uçuş durumu
-            this.isOnGround = true;        // Uçak yerde mi?
-            this.isEngineStarted = false;  // Motor çalışıyor mu?
-            this.isTakingOff = false;      // Kalkış yapıyor mu?
-            this.isLanding = false;        // İniş yapıyor mu?
-            this.groundContact = false;    // Yerle temas var mı?
-            this.takeoffSpeed = 30;        // Kalkış hızı (m/s)
-            this.landingGear = true;       // İniş takımları açık mı?
-            this.flapsPosition = 0;        // Flap pozisyonu (0-1)
+            // Owner ve kontrol
+            this.ownerId = options.ownerId || null;
+            this.scene = options.scene || null;
+            this.physics = options.physics || null;
+            this.position = options.position || new THREE.Vector3(0, 100, 0);
+            this.rotation = new THREE.Euler();
+            this.quaternion = new THREE.Quaternion();
+            this.velocity = new THREE.Vector3();
+            this.angularVelocity = new THREE.Vector3();
+            this.modelRotation = options.modelRotation || new THREE.Euler(0, 0, 0);
             
-            // Kontrol durumları
-            this.prevEngineToggle = false;
-            this.prevGearToggle = false;
-            this.prevFlapsToggle = false;
-            this.prevTakeoffToggle = false;
-            this.prevLandingToggle = false;
-            
-            // Uzak uçak için interpolasyon
-            this.targetPosition = null;
-            this.targetRotation = null;
-            this.lerpFactor = 0.1;
-            
-            // Ateş etme parametreleri
-            this.lastFireTime = 0;
-            this.fireRate = 0.2; // saniye
-            
-            // Three.js mesh
-            this.mesh = null;
-            
-            // Cannon.js body
+            // Gövde ve görünüm
             this.body = null;
+            this.mesh = null;
+            this.collisionMesh = null;
+            this.modelScale = options.modelScale || new THREE.Vector3(1, 1, 1);
+            this.color = options.color || 0x3333ff;
+            this.team = options.team || 'blue';
+            this.engineSystem = new EngineSystem(this);
             
-            // Referanslar
-            this.scene = options.scene;
-            this.physics = options.physics;
-            this.effects = options.effects;
-            this.ui = options.ui;
+            // Input ve kontroller
+            this.inputs = {
+                pitch: 0,
+                roll: 0,
+                yaw: 0,
+                throttle: 0,
+                brake: false,
+                boost: false,
+                fire: false
+            };
             
-            // Scene kontrolü
-            if (!this.scene) {
-                console.warn('Scene not provided to Aircraft');
-            }
+            // Efekt yöneticisi
+            this.effects = options.effects || null;
             
-            // Uçak modelini oluştur
-            const position = options.position || new THREE.Vector3(0, 0, 0);
-            this.createAircraft(position);
+            // Performans optimizasyonu ayarları
+            this.useSimpleGeometry = options.useSimpleGeometry || false;
+            this.enableShadows = options.enableShadows !== undefined ? options.enableShadows : true;
+            this.lowPolygonModel = options.lowPolygonModel || false;
+            this.updateFrequency = options.updateFrequency || 1;
+            this.updateCounter = 0;
+            this.renderDistance = options.renderDistance || 2000;
+            this.isVisible = true;
+            this.lodLevel = 0; // 0: Tam detay, 1: Orta detay, 2: Düşük detay
+            this.lastLodUpdateTime = 0;
+            this.lodUpdateInterval = 500; // ms
             
-            // Motor sistemini oluştur
-            if (!this.isRemote) {
-                try {
-                    this.engine = new EngineSystem(this, {
-                        enginePower: this.aircraftData.enginePower || GameConstants.PHYSICS.AIRCRAFT.TYPES.FIGHTER.ENGINE_POWER,
-                        fuselageLength: 10
-                    });
-                    console.log('Engine system created successfully');
-                } catch (error) {
-                    console.error('Error creating engine system:', error);
-                    // Motor sistemi oluşturulamazsa, uçak yine de çalışabilir
-                    this.engine = null;
-                }
-            }
+            // Fizik ve görsel öğeleri başlat
+            this.initialize(options);
             
-            console.log(`Aircraft created: ${this.id}, ${this.type}, position: ${position.x}, ${position.y}, ${position.z}`);
+            // Debug modu
+            this.debug = false;
         } catch (error) {
-            console.error('Error creating aircraft:', error);
-            throw error; // Kritik bir hata, yeniden fırlat
+            console.error('Error initializing aircraft:', error);
         }
     }
     
     /**
-     * Uçak modelini oluştur
-     * @param {THREE.Vector3} position - Başlangıç pozisyonu
+     * Uçağı başlat - Optimize edilmiş versiyon
+     * @param {Object} options - Başlatma seçenekleri
      */
-    createAircraft(position) {
-        // İlk olarak eski uçak modelini oluştur (yedek olarak)
-        this.createBasicAircraft(position);
+    initialize(options) {
+        // Scene ve physics kontrolü
+        if (!this.scene) {
+            console.error('Scene is required for aircraft initialization');
+            return;
+        }
         
-        // GLTF model yükle (varsa)
-        this.loadAircraftModel(position);
+        if (!this.physics) {
+            console.error('Physics is required for aircraft initialization');
+            return;
+        }
+        
+        try {
+            // Fizik gövdesini oluştur
+            this.createPhysicsBody(options);
+            
+            // Görsel modelini oluştur
+            this.createVisualModel(options);
+            
+            // Çarpışma callback'ini ekle
+            if (this.physics && !this.isRemote) {
+                this.physics.addCollisionCallback(this.id, this.handleCollision.bind(this));
+            }
+        } catch (error) {
+            console.error('Error in aircraft initialization:', error);
+        }
     }
     
-    createBasicAircraft(position) {
+    /**
+     * Fizik gövdesini oluştur - Optimize edilmiş versiyon
+     * @param {Object} options - Gövde oluşturma seçenekleri
+     */
+    createPhysicsBody(options) {
         try {
-            // Uçak gövdesi
-            const bodyGeometry = new THREE.CylinderGeometry(0.8, 0.8, 4, 8);
-            const bodyMaterial = new THREE.MeshPhongMaterial({
-                color: this.options.color || 0x0077be,
-                shininess: 100,
-                specular: 0x111111
-            });
-            const body = new THREE.Mesh(bodyGeometry, bodyMaterial);
-            body.rotation.x = Math.PI / 2;
-            body.castShadow = true;
-            body.receiveShadow = true;
-            
-            // Kanatlar
-            const wingGeometry = new THREE.BoxGeometry(7, 0.2, 1.5);
-            const wingMaterial = new THREE.MeshPhongMaterial({
-                color: this.options.color || 0x0077be,
-                shininess: 30,
-                specular: 0x222222
-            });
-            const wings = new THREE.Mesh(wingGeometry, wingMaterial);
-            wings.position.y = 0.1;
-            wings.castShadow = true;
-            wings.receiveShadow = true;
-            
-            // Kuyruk
-            const tailGeometry = new THREE.BoxGeometry(1.5, 1, 0.2);
-            const tail = new THREE.Mesh(tailGeometry, wingMaterial);
-            tail.position.z = -2;
-            tail.position.y = 0.5;
-            tail.castShadow = true;
-            tail.receiveShadow = true;
-            
-            // Dikey kuyruk
-            const verticalTailGeometry = new THREE.BoxGeometry(0.2, 1, 1);
-            const verticalTail = new THREE.Mesh(verticalTailGeometry, wingMaterial);
-            verticalTail.position.z = -2;
-            verticalTail.position.y = 1;
-            verticalTail.castShadow = true;
-            verticalTail.receiveShadow = true;
-            
-            // Kokpit
-            const cockpitGeometry = new THREE.SphereGeometry(0.8, 16, 16, 0, Math.PI * 2, 0, Math.PI / 2);
-            const cockpitMaterial = new THREE.MeshPhongMaterial({
-                color: 0x333333,
-                transparent: true,
-                opacity: 0.7,
-                shininess: 100,
-                specular: 0xffffff
-            });
-            const cockpit = new THREE.Mesh(cockpitGeometry, cockpitMaterial);
-            cockpit.position.z = 1.2;
-            cockpit.position.y = 0.3;
-            cockpit.rotation.x = Math.PI;
-            cockpit.castShadow = true;
-            
-            // İniş takımları
-            const landingGearGeometry = new THREE.CylinderGeometry(0.1, 0.1, 0.8, 8);
-            const landingGearMaterial = new THREE.MeshPhongMaterial({
-                color: 0x333333
-            });
-            
-            const leftGear = new THREE.Mesh(landingGearGeometry, landingGearMaterial);
-            leftGear.position.set(-1, -0.6, 0);
-            leftGear.castShadow = true;
-            
-            const rightGear = new THREE.Mesh(landingGearGeometry, landingGearMaterial);
-            rightGear.position.set(1, -0.6, 0);
-            rightGear.castShadow = true;
-            
-            const rearGear = new THREE.Mesh(landingGearGeometry, landingGearMaterial);
-            rearGear.position.set(0, -0.6, -1.5);
-            rearGear.castShadow = true;
-            
-            // Tekerler
-            const wheelGeometry = new THREE.TorusGeometry(0.2, 0.1, 8, 16);
-            const wheelMaterial = new THREE.MeshPhongMaterial({
-                color: 0x222222
-            });
-            
-            const leftWheel = new THREE.Mesh(wheelGeometry, wheelMaterial);
-            leftWheel.position.set(-1, -1, 0);
-            leftWheel.rotation.x = Math.PI / 2;
-            leftWheel.castShadow = true;
-            
-            const rightWheel = new THREE.Mesh(wheelGeometry, wheelMaterial);
-            rightWheel.position.set(1, -1, 0);
-            rightWheel.rotation.x = Math.PI / 2;
-            rightWheel.castShadow = true;
-            
-            const rearWheel = new THREE.Mesh(wheelGeometry, wheelMaterial);
-            rearWheel.position.set(0, -1, -1.5);
-            rearWheel.rotation.x = Math.PI / 2;
-            rearWheel.castShadow = true;
-            
-            // Pervaneler veya motorlar
-            const propellerGeometry = new THREE.BoxGeometry(0.2, 1.5, 0.1);
-            const propellerMaterial = new THREE.MeshPhongMaterial({
-                color: 0x333333
-            });
-            
-            const propeller = new THREE.Mesh(propellerGeometry, propellerMaterial);
-            propeller.position.z = 2;
-            propeller.castShadow = true;
-            
-            // İniş takımlarını bir grup olarak ekle (açılıp kapanabilir)
-            this.landingGearGroup = new THREE.Group();
-            this.landingGearGroup.add(leftGear);
-            this.landingGearGroup.add(rightGear);
-            this.landingGearGroup.add(rearGear);
-            this.landingGearGroup.add(leftWheel);
-            this.landingGearGroup.add(rightWheel);
-            this.landingGearGroup.add(rearWheel);
-            
-            // Pervaneler için grup (dönebilir)
-            this.propGroup = new THREE.Group();
-            this.propGroup.add(propeller);
-            
-            // Tüm parçaları ana modele ekle
-            this.mesh = new THREE.Group();
-            this.mesh.add(body);
-            this.mesh.add(wings);
-            this.mesh.add(tail);
-            this.mesh.add(verticalTail);
-            this.mesh.add(cockpit);
-            this.mesh.add(this.landingGearGroup);
-            this.mesh.add(this.propGroup);
-            
-            // Pozisyonu ayarla
-            this.mesh.position.copy(position);
-            
-            // Uçak ID'si ve bilgileri
-            this.mesh.userData.aircraftId = this.id;
-            this.mesh.userData.ownerId = this.options.ownerId;
-            
-            // Uçak ismi metni
-            if (this.options.name) {
-                this.nameSprite = this.createTextSprite(this.options.name);
-                this.nameSprite.position.y = 2;
-                this.mesh.add(this.nameSprite);
+            // Fizik sistemi yüklü değilse atlayalım
+            if (!this.physics || !this.physics.createAircraftBody) {
+                console.error('Physics system not available');
+                return;
             }
+            
+            // Eğer basit geometri kullanılacaksa, daha basit bir fizik gövdesi oluştur
+            const createOptions = {
+                id: this.id,
+                mass: this.mass,
+                position: new CANNON.Vec3(
+                    this.position.x,
+                    this.position.y,
+                    this.position.z
+                ),
+                size: new CANNON.Vec3(3, 1, 6),
+                useSimpleShape: this.useSimpleGeometry || this.lowPolygonModel
+            };
+            
+            // Uzaktan kontrol edilen uçaklar için daha basit fizik
+            if (this.isRemote) {
+                createOptions.linearDamping = 0.1; // Daha yüksek sönümleme
+                createOptions.updateFrequency = 2; // Daha seyrek güncelleme
+            }
+            
+            // Aircraft fiziği oluştur
+            this.body = this.physics.createAircraftBody(createOptions);
+            
+            if (!this.body) {
+                throw new Error('Failed to create aircraft physics body');
+            }
+            
+            // Başlangıç pozisyonunu eşitle
+            this.syncPositionWithBody();
+        } catch (error) {
+            console.error('Error creating aircraft physics body:', error);
+        }
+    }
+    
+    /**
+     * Görsel modeli oluştur - Optimize edilmiş versiyon
+     * @param {Object} options - Model oluşturma seçenekleri 
+     */
+    createVisualModel(options) {
+        try {
+            // Ekran kartını yormayacak basit bir model oluştur
+            let geometry;
+            
+            if (this.useSimpleGeometry || this.lowPolygonModel) {
+                // Basit geometri: Sadece bir kutu
+                geometry = new THREE.BoxGeometry(3, 1, 6);
+            } else {
+                // Normal detaylı uçak modeli
+                geometry = this.createBasicAircraftGeometry();
+            }
+            
+            // Materyal - takıma göre renk
+            const material = new THREE.MeshLambertMaterial({ 
+                color: this.color,
+                flatShading: true, // Daha hızlı render
+                emissive: 0x000000,
+                specular: 0x111111,
+                shininess: 30
+            });
+            
+            // Mesh oluştur
+            this.mesh = new THREE.Mesh(geometry, material);
+            this.mesh.name = `aircraft_${this.id}`;
+            this.mesh.userData.id = this.id;
+            this.mesh.userData.type = 'aircraft';
+            this.mesh.userData.ownerId = this.ownerId;
+            
+            // Gölgeler - performans için opsiyonel
+            if (this.enableShadows) {
+                this.mesh.castShadow = true;
+                this.mesh.receiveShadow = false;
+            } else {
+                this.mesh.castShadow = false;
+                this.mesh.receiveShadow = false;
+            }
+            
+            // Pozisyon ve rotasyonu ayarla
+            this.mesh.position.copy(this.position);
+            this.mesh.rotation.copy(this.rotation);
+            this.mesh.scale.copy(this.modelScale);
             
             // Sahneye ekle
-            if (this.options.scene) {
-                this.options.scene.add(this.mesh);
+            this.scene.add(this.mesh);
+            
+            // Motor ve egzoz efektleri
+            if (this.effects && !this.isRemote) {
+                this.engineSystem.createEngineEffects(this.effects);
             }
             
-            console.log(`Basic aircraft model created with ID: ${this.id}`);
+            // Takım rengine göre ışık ekle - opsiyonel
+            if (!this.useSimpleGeometry && !this.lowPolygonModel) {
+                this.addTeamLight();
+            }
         } catch (error) {
-            console.error("Error creating basic aircraft model:", error);
-        }
-    }
-    
-    loadAircraftModel(position) {
-        // GLTF model yükleyici
-        if (!this.options.scene) {
-            console.warn("Scene not provided, skipping GLTF model loading");
-            return;
-        }
-        
-        try {
-            const loader = new THREE.GLTFLoader();
-            const modelUrl = 'https://threejs.org/examples/models/gltf/Parrot.glb'; // Örnek model URL (değiştirilebilir)
-            
-            loader.load(
-                modelUrl,
-                (gltf) => {
-                    // Modeli başarıyla yükledi
-                    const model = gltf.scene;
-                    
-                    // Modeli ölçeklendir ve pozisyonla
-                    model.scale.set(0.01, 0.01, 0.01); // Ölçeği modele göre ayarla
-                    model.position.copy(position);
-                    
-                    // Modele gölge ekle
-                    model.traverse((child) => {
-                        if (child.isMesh) {
-                            child.castShadow = true;
-                            child.receiveShadow = true;
-                        }
-                    });
-                    
-                    // Mevcut basit modeli kaldır ve GLTF modeli ekle
-                    if (this.mesh && this.options.scene) {
-                        this.options.scene.remove(this.mesh);
-                    }
-                    
-                    this.mesh = model;
-                    
-                    // Uçak ID'si ve bilgileri
-                    this.mesh.userData.aircraftId = this.id;
-                    this.mesh.userData.ownerId = this.options.ownerId;
-                    
-                    // İsim ekle
-                    if (this.options.name) {
-                        this.nameSprite = this.createTextSprite(this.options.name);
-                        this.nameSprite.position.y = 2;
-                        this.mesh.add(this.nameSprite);
-                    }
-                    
-                    // Sahneye ekle
-                    this.options.scene.add(this.mesh);
-                    
-                    console.log(`GLTF aircraft model loaded with ID: ${this.id}`);
-                },
-                (xhr) => {
-                    // Yükleme ilerlemesi
-                    const percentage = (xhr.loaded / xhr.total) * 100;
-                    console.log(`Loading aircraft model: ${Math.round(percentage)}%`);
-                },
-                (error) => {
-                    // Yükleme hatası
-                    console.error('Error loading GLTF model:', error);
-                    console.log("Continuing with basic aircraft model");
-                }
-            );
-        } catch (error) {
-            console.error("Error in GLTF loading process:", error);
-            console.log("Continuing with basic aircraft model");
+            console.error('Error creating aircraft visual model:', error);
         }
     }
     
     /**
-     * Yazı sprite'ı oluştur
-     * @param {string} text - Gösterilecek yazı
-     * @returns {THREE.Sprite} - Yazı sprite'ı
+     * Basit uçak geometrisi oluştur - düşük poligon model
+     * @returns {THREE.BufferGeometry} - Uçak geometrisi
      */
-    createTextSprite(text) {
-        const canvas = document.createElement('canvas');
-        const context = canvas.getContext('2d');
-        canvas.width = 256;
-        canvas.height = 64;
+    createBasicAircraftGeometry() {
+        // Basit uçak geometrisi oluştur
+        const geometry = new THREE.BufferGeometry();
         
-        context.font = '24px Arial';
-        context.fillStyle = 'white';
-        context.textAlign = 'center';
-        context.fillText(text, 128, 32);
+        // Düşük poligonlu bir uçak modeli için vertexler
+        const vertices = new Float32Array([
+            // Gövde - kanat - kuyruk için basit vertexler
+            // Kübik değil biraz daha uçak formunda
+            // Ana gövde
+            0, 0, 3,    // 0: burun
+            1, 0, 0,    // 1: sağ gövde orta
+            -1, 0, 0,   // 2: sol gövde orta
+            0, 0.5, 0,  // 3: gövde üst
+            0, -0.5, 0, // 4: gövde alt
+            0, 0, -3,   // 5: kuyruk
+            
+            // Kanatlar
+            3, 0, 0,    // 6: sağ kanat ucu
+            -3, 0, 0,   // 7: sol kanat ucu
+            
+            // Kuyruk kanatları
+            1, 0.5, -2,  // 8: sağ kuyruk kanadı
+            -1, 0.5, -2, // 9: sol kuyruk kanadı
+            0, 1, -2     // 10: dikey kuyruk kanadı
+        ]);
         
-        const texture = new THREE.CanvasTexture(canvas);
-        const material = new THREE.SpriteMaterial({ map: texture });
-        const sprite = new THREE.Sprite(material);
-        sprite.scale.set(5, 1.25, 1);
+        // Yüzeyler için indeksler
+        const indices = [
+            // Gövde
+            0, 1, 3,
+            0, 3, 2,
+            0, 2, 4,
+            0, 4, 1,
+            5, 3, 1,
+            5, 2, 3,
+            5, 4, 2,
+            5, 1, 4,
+            
+            // Kanatlar
+            1, 6, 3,
+            1, 4, 6,
+            2, 3, 7,
+            2, 7, 4,
+            
+            // Kuyruk kanatları
+            5, 8, 10,
+            5, 10, 9,
+            5, 9, 5
+        ];
         
-        return sprite;
+        // UV koordinatları - basit
+        const uvs = new Float32Array([
+            0.5, 1.0,  // 0
+            0.75, 0.5, // 1
+            0.25, 0.5, // 2
+            0.5, 0.75, // 3
+            0.5, 0.25, // 4
+            0.5, 0.0,  // 5
+            1.0, 0.5,  // 6
+            0.0, 0.5,  // 7
+            0.75, 0.25, // 8
+            0.25, 0.25, // 9
+            0.5, 0.25   // 10
+        ]);
+        
+        // Geometriyi oluştur
+        geometry.setAttribute('position', new THREE.BufferAttribute(vertices, 3));
+        geometry.setAttribute('uv', new THREE.BufferAttribute(uvs, 2));
+        geometry.setIndex(indices);
+        
+        // Normal hesapla
+        geometry.computeVertexNormals();
+        
+        return geometry;
     }
     
     /**
-     * Uçağı güncelle
-     * @param {number} deltaTime - Geçen süre (saniye)
-     * @param {Object} inputs - Kullanıcı girişleri
+     * Takım rengine göre ışık ekle - düşük yoğunlukta
      */
-    update(deltaTime, inputs = {}) {
-        if (!this.mesh) {
-            console.error('Aircraft mesh is not initialized');
-            return;
-        }
-        
-        try {
-            // Temel parametreler
-            const maxSpeed = this.maxSpeed; // m/s
-            const acceleration = this.acceleration; // m/s²
-            const rotationSpeed = this.rotationSpeed; // radyan/saniye
-            
-            // 1. Motor Kontrolü
-            // Motor çalıştırma/durdurma (E tuşu)
-            if (inputs.engineToggle && !this.prevEngineToggle) {
-                this.isEngineStarted = !this.isEngineStarted;
-                console.log(`Engine ${this.isEngineStarted ? 'started' : 'stopped'}`);
-                
-                // Motor çalıştırma/durdurma sesi
-                if (this.effects) {
-                    if (this.isEngineStarted) {
-                        this.effects.playEngineStartSound();
-                    } else {
-                        this.effects.playEngineStopSound();
-                    }
-                }
-            }
-            this.prevEngineToggle = inputs.engineToggle;
-            
-            // 2. İniş Takımı Kontrolü (G tuşu)
-            if (inputs.gearToggle && !this.prevGearToggle) {
-                // Sadece belirli bir yüksekliğin üzerindeyken iniş takımlarını kapatabilir
-                if (!this.isOnGround || this.landingGear) {
-                    this.landingGear = !this.landingGear;
-                    console.log(`Landing gear ${this.landingGear ? 'down' : 'up'}`);
-                    
-                    // İniş takımı sesi
-                    if (this.effects) {
-                        this.effects.playGearSound();
-                    }
-                }
-            }
-            this.prevGearToggle = inputs.gearToggle;
-            
-            // 3. Flap Kontrolü (F tuşu)
-            if (inputs.flapsToggle && !this.prevFlapsToggle) {
-                // Flap pozisyonunu değiştir (0, 0.33, 0.66, 1.0)
-                this.flapsPosition = (this.flapsPosition + 0.33) % 1.01;
-                this.flapsPosition = Math.round(this.flapsPosition * 100) / 100; // Yuvarlama hatalarını önle
-                console.log(`Flaps set to: ${this.flapsPosition}`);
-                
-                // Flap sesi
-                if (this.effects) {
-                    this.effects.playFlapsSound();
-                }
-            }
-            this.prevFlapsToggle = inputs.flapsToggle;
-            
-            // 4. Kalkış/İniş Kontrolü (T/L tuşları)
-            if (inputs.takeoffToggle && !this.prevTakeoffToggle) {
-                this.startTakeoff();
-            }
-            this.prevTakeoffToggle = inputs.takeoffToggle;
-            
-            if (inputs.landingToggle && !this.prevLandingToggle) {
-                this.startLanding();
-            }
-            this.prevLandingToggle = inputs.landingToggle;
-            
-            // 5. Uçuş Fiziği Güncelleme
-            if (this.isOnGround) {
-                // YERDE KONTROL SİSTEMİ
-                
-                // Pist üzerinde olup olmadığını kontrol et
-                const onRunway = this.isOnRunway();
-                
-                // Motor çalışmıyorsa hareket etme
-                if (!this.isEngineStarted) {
-                    this.speed = Math.max(0, this.speed - acceleration * deltaTime * 2);
-                } else {
-                    // Gaz kontrolü
-                    const targetSpeed = inputs.throttle * this.takeoffSpeed * 1.2;
-                    
-                    // Hızı yumuşak bir şekilde değiştir
-                    if (Math.abs(this.speed - targetSpeed) > 0.1) {
-                        if (this.speed < targetSpeed) {
-                            // Hızlanma (pist üzerinde daha hızlı, çimde daha yavaş)
-                            const accelFactor = onRunway ? 1.0 : 0.3;
-                            this.speed = Math.min(this.speed + acceleration * deltaTime * accelFactor, targetSpeed);
-                        } else {
-                            // Yavaşlama
-                            this.speed = Math.max(this.speed - acceleration * deltaTime, targetSpeed);
-                        }
-                    } else {
-                        this.speed = targetSpeed;
-                    }
-                }
-                
-                // Yönlendirme kontrolü (sadece yerde)
-                if (this.speed > 1) {
-                    const steeringFactor = Math.min(1.0, this.speed / 10); // Düşük hızda daha hassas
-                    const yawAmount = inputs.yaw * rotationSpeed * deltaTime * steeringFactor;
-                    
-                    if (Math.abs(yawAmount) > 0.001 && this.body) {
-                        const yawQuat = new CANNON.Quaternion();
-                        yawQuat.setFromAxisAngle(new CANNON.Vec3(0, 1, 0), yawAmount);
-                        this.body.quaternion = yawQuat.mult(this.body.quaternion);
-                    }
-                }
-                
-                // Kalkış kontrolü
-                if (this.isTakingOff && onRunway) {
-                    if (this.speed >= this.takeoffSpeed && inputs.pitch > 0.5) {
-                        this.isOnGround = false;
-                        this.isTakingOff = false; // Kalkış tamamlandı
-                        console.log('Taking off!');
-                        
-                        // Kalkış sesi
-                        if (this.effects) {
-                            this.effects.playTakeoffSound();
-                            this.effects.showMessage('Kalkış başarılı!', 'success');
-                        }
-                    } else if (this.speed >= this.takeoffSpeed * 0.8) {
-                        // Kalkış hızına yaklaşıldığında bildirim
-                        if (this.effects && Math.random() < 0.01) { // Çok sık gösterme
-                            this.effects.showMessage('Kalkış hızına yaklaşıldı! Burnunu kaldırmak için W tuşuna basın.', 'info');
-                        }
-                    }
-                }
-            } else {
-                // HAVADA KONTROL SİSTEMİ
-                
-                // Motor çalışmıyorsa süzülme moduna geç
-                const enginePower = this.isEngineStarted ? 1.0 : 0.0;
-                
-                // Boost faktörü
-                const boostFactor = inputs.boost ? 1.5 : 1.0;
-                
-                // Flap etkisi
-                const flapsEffect = 1.0 + this.flapsPosition * 0.3; // Flaplar kaldırma kuvvetini artırır
-                
-                // İniş takımı etkisi
-                const gearDragFactor = this.landingGear ? 1.2 : 1.0; // İniş takımları sürüklenmeyi artırır
-                
-                // İniş modu etkisi
-                if (this.isLanding) {
-                    // İniş modunda daha stabil uçuş
-                    const runwayPosition = this.getRunwayPosition();
-                    const currentPosition = this.getPosition();
-                    
-                    // Piste yaklaşma durumunu kontrol et
-                    const distanceToRunway = currentPosition.distanceTo(runwayPosition);
-                    
-                    if (distanceToRunway < 200) {
-                        // Piste yaklaşıldığında bildirim
-                        if (this.effects && Math.random() < 0.01) { // Çok sık gösterme
-                            this.effects.showMessage(`Piste yaklaşılıyor: ${Math.floor(distanceToRunway)}m`, 'info');
-                        }
-                        
-                        // Piste çok yakınsa ve yeterince alçaktaysa, iniş tamamlandı
-                        if (distanceToRunway < 20 && currentPosition.y < GameConstants.WORLD.GROUND_HEIGHT + 5) {
-                            this.isLanding = false;
-                            this.isOnGround = true;
-                            
-                            if (this.effects) {
-                                this.effects.showMessage('İniş başarılı!', 'success');
-                                this.effects.playLandingSound();
-                            }
-                        }
-                    }
-                }
-                
-                // Hedef hız hesapla
-                const targetSpeed = inputs.throttle * maxSpeed * enginePower * boostFactor;
-                
-                // Mevcut hızı hedef hıza doğru yumuşak bir şekilde değiştir
-                if (Math.abs(this.speed - targetSpeed) > 0.1) {
-                    if (this.speed < targetSpeed) {
-                        // Hızlanma
-                        this.speed = Math.min(this.speed + acceleration * deltaTime, targetSpeed);
-                    } else {
-                        // Yavaşlama
-                        this.speed = Math.max(this.speed - acceleration * deltaTime * 0.5, targetSpeed);
-                    }
-                } else {
-                    this.speed = targetSpeed;
-                }
-                
-                // Rotasyon kontrolü
-                // Rotasyon miktarını hesapla
-                const pitchAmount = inputs.pitch * rotationSpeed * deltaTime;
-                const rollAmount = inputs.roll * rotationSpeed * deltaTime;
-                const yawAmount = inputs.yaw * rotationSpeed * deltaTime;
-                
-                // Quaternion'ları oluştur
-                if (Math.abs(pitchAmount) > 0.001) {
-                    const pitchQuat = new CANNON.Quaternion();
-                    pitchQuat.setFromAxisAngle(new CANNON.Vec3(1, 0, 0), pitchAmount);
-                    this.body.quaternion = pitchQuat.mult(this.body.quaternion);
-                }
-                
-                if (Math.abs(rollAmount) > 0.001) {
-                    const rollQuat = new CANNON.Quaternion();
-                    rollQuat.setFromAxisAngle(new CANNON.Vec3(0, 0, 1), -rollAmount);
-                    this.body.quaternion = rollQuat.mult(this.body.quaternion);
-                }
-                
-                if (Math.abs(yawAmount) > 0.001) {
-                    const yawQuat = new CANNON.Quaternion();
-                    yawQuat.setFromAxisAngle(new CANNON.Vec3(0, 1, 0), yawAmount);
-                    this.body.quaternion = yawQuat.mult(this.body.quaternion);
-                }
-                
-                // İniş kontrolü
-                if (this.isLanding) {
-                    // Pist üzerinde olup olmadığını kontrol et
-                    const onRunway = this.isOnRunway();
-                    
-                    if (onRunway) {
-                        // Piste yaklaşırken yavaşla
-                        const position = this.getPosition();
-                        const altitude = position.y - GameConstants.WORLD.GROUND_HEIGHT;
-                        
-                        if (altitude < 20) {
-                            // Alçak irtifada yavaşla
-                            this.speed = Math.max(this.speed - acceleration * deltaTime, this.takeoffSpeed * 0.8);
-                            
-                            // Dikey hızı kontrol et
-                            if (this.verticalSpeed < -5) {
-                                // Çok hızlı alçalıyorsa uyarı ver
-                                if (this.effects) {
-                                    this.effects.showMessage('Çok hızlı alçalıyorsunuz! Burnunu kaldırın.', 'warning');
-                                }
-                            }
-                            
-                            // Yere çok yakınsa ve dikey hız uygunsa, yere in
-                            if (altitude < 2 && this.verticalSpeed > -3 && this.verticalSpeed < 0) {
-                                this.isOnGround = true;
-                                this.isLanding = false;
-                                
-                                // İniş sesi
-                                if (this.effects) {
-                                    this.effects.playLandingSound();
-                                    this.effects.showMessage('İniş başarılı!', 'success');
-                                }
-                                
-                                console.log('Landed successfully!');
-                            }
-                        }
-                    } else {
-                        // Pist üzerinde değilse, iniş modunu iptal et
-                        if (this.effects) {
-                            this.effects.showMessage('Pist bulunamadı! İniş iptal edildi.', 'warning');
-                        }
-                        
-                        this.isLanding = false;
-                    }
-                }
-            }
-            
-            // 6. Fizik Güncelleme
-            if (this.body) {
-                // Uçağın yönünü al
-                const quaternion = this.body.quaternion;
-                const rotation = new CANNON.Vec3();
-                quaternion.toEuler(rotation);
-                
-                // Uçağın ileri vektörünü hesapla
-                const forwardVec = new CANNON.Vec3(0, 0, 1);
-                quaternion.vmult(forwardVec, forwardVec);
-                
-                // Uçağın yukarı vektörünü hesapla
-                const upVec = new CANNON.Vec3(0, 1, 0);
-                quaternion.vmult(upVec, upVec);
-                
-                // Yerçekimi ve kaldırma kuvveti
-                const gravity = -9.81; // m/s²
-                const liftFactor = this.speed * 0.01 * (1.0 + this.flapsPosition * 0.5);
-                
-                // Dikey hızı hesapla
-                const currentPos = this.getPosition();
-                this.verticalSpeed = (currentPos.y - this.lastPosition.y) / deltaTime;
-                this.lastPosition.copy(currentPos);
-                
-                // Stall durumunu kontrol et
-                this.isStalling = this.speed < this.aircraftData.stallSpeed && !this.isOnGround;
-                
-                if (this.isStalling && !this.isOnGround) {
-                    // Stall durumunda kontrol kaybı
-                    if (this.effects && !this.stallWarningPlayed) {
-                        this.effects.playStallWarningSound();
-                        this.effects.showMessage('STALL! STALL! Hızınızı artırın!', 'danger');
-                        this.stallWarningPlayed = true;
-                    }
-                } else {
-                    this.stallWarningPlayed = false;
-                }
-                
-                // Hız vektörünü hesapla
-                const velocity = forwardVec.scale(this.speed);
-                
-                // Yerçekimi etkisini ekle (yerde değilse)
-                if (!this.isOnGround) {
-                    // Kaldırma kuvveti (lift)
-                    const lift = upVec.scale(liftFactor);
-                    
-                    // Stall durumunda kaldırma kuvveti azalır
-                    const liftMultiplier = this.isStalling ? 0.3 : 1.0;
-                    
-                    // Yerçekimi ve kaldırma kuvvetini birleştir
-                    velocity.y += gravity + (lift.y * liftMultiplier);
-                } else {
-                    // Yerdeyken y hızını sıfırla
-                    velocity.y = 0;
-                }
-                
-                // Hızı uygula
-                this.body.velocity.copy(velocity);
-                
-                // Mesh pozisyonunu ve rotasyonunu güncelle
-                this.mesh.position.copy(this.body.position);
-                this.mesh.quaternion.copy(this.body.quaternion);
-                
-                // Pervaneleri döndür (eğer motor çalışıyorsa)
-                if (this.propGroup && this.isEngineStarted) {
-                    // Pervane dönüş hızı throttle'a bağlı
-                    const propellerSpeed = 10 * inputs.throttle;
-                    this.propGroup.rotation.z += propellerSpeed * deltaTime;
-                }
-                
-                // Yerle temas kontrolü
-                const position = this.getPosition();
-                const altitude = position.y - GameConstants.WORLD.GROUND_HEIGHT;
-                
-                if (altitude <= 0.5 && !this.isOnGround) {
-                    // Yere çarptı
-                    this.groundContact = true;
-                    
-                    // İniş takımları açık değilse veya dikey hız çok yüksekse hasar al
-                    if (!this.landingGear || this.verticalSpeed < -10) {
-                        const damage = Math.abs(this.verticalSpeed) * 2;
-                        this.takeDamage(damage);
-                        
-                        if (this.effects) {
-                            this.effects.playCrashSound();
-                            this.effects.showMessage('Sert iniş! Hasar alındı.', 'danger');
-                        }
-                        
-                        console.log(`Crash landing! Damage: ${damage}`);
-                    } else {
-                        // Normal iniş
-                        if (this.effects) {
-                            this.effects.playLandingSound();
-                        }
-                    }
-                    
-                    this.isOnGround = true;
-                    this.isLanding = false;
-                } else {
-                    this.groundContact = false;
-                }
-            }
-            
-            // 7. Silah Sistemi Güncelleme
-            this.updateWeapons(deltaTime, inputs);
-            
-            // 8. Efekt Sistemi Güncelleme
-            if (this.effects && this.effects.update) {
-                this.effects.update(deltaTime, this);
-            }
-            
-            // 9. Motor Sistemi Güncelleme
-            if (this.engineSystem && this.engineSystem.update) {
-                this.engineSystem.update(deltaTime, this.isEngineStarted, this.speed / this.maxSpeed);
-            }
-            
-            // UI'ı güncelle
-            if (this.ui && this.ui.update) {
-                this.ui.update({
-                    altitude: this.getPosition().y,
-                    speed: this.speed,
-                    verticalSpeed: this.verticalSpeed,
-                    ammo: this.ammo,
-                    maxAmmo: this.maxAmmo,
-                    isTakingOff: this.isTakingOff,
-                    isLanding: this.isLanding
-                });
-            }
-            
-        } catch (error) {
-            console.error('Error in aircraft update:', error);
-        }
-    }
-    
-    /**
-     * Uçağın pist üzerinde olup olmadığını kontrol et
-     * @param {Object} world - Dünya nesnesi
-     * @returns {boolean} - Uçak pist üzerinde mi?
-     */
-    isOnRunway() {
-        if (!this.mesh || !this.world || !this.world.objects.runway) {
-            return false;
-        }
-        
-        // Uçağın pozisyonunu al
-        const position = this.getPosition();
-        
-        // Pistin pozisyonunu ve boyutlarını al
-        const runway = this.world.objects.runway;
-        const runwayPos = runway.position.clone();
-        const runwayWidth = this.world.runwayWidth;
-        const runwayLength = this.world.runwayLength;
-        
-        // Pistin sınırlarını hesapla
-        const halfWidth = runwayWidth / 2;
-        const halfLength = runwayLength / 2;
-        
-        // Uçağın pist sınırları içinde olup olmadığını kontrol et
-        const isWithinX = position.x >= runwayPos.x - halfWidth && position.x <= runwayPos.x + halfWidth;
-        const isWithinZ = position.z >= runwayPos.z - halfLength && position.z <= runwayPos.z + halfLength;
-        const isNearGround = position.y <= GameConstants.WORLD.GROUND_HEIGHT + 2;
-        
-        return isWithinX && isWithinZ && isNearGround;
-    }
-    
-    /**
-     * Kalkış prosedürünü başlat
-     */
-    startTakeoff() {
-        if (!this.isOnGround || this.isTakingOff) {
-            return;
-        }
-        
-        console.log('Starting takeoff procedure...');
-        
-        // Kalkış için gerekli kontrolleri yap
-        if (!this.isEngineStarted) {
-            console.log('Cannot takeoff: Engine not started');
-            if (this.effects && this.effects.showMessage) {
-                this.effects.showMessage('Motor çalıştırılmadı! Kalkış için E tuşuna basın.', 'warning');
-            }
-            return;
-        }
-        
-        if (!this.landingGear) {
-            console.log('Cannot takeoff: Landing gear not deployed');
-            if (this.effects && this.effects.showMessage) {
-                this.effects.showMessage('İniş takımları açık değil! G tuşuna basın.', 'warning');
-            }
-            return;
-        }
-        
-        // Kalkış modunu aktifleştir
-        this.isTakingOff = true;
-        
-        // Flapları kalkış pozisyonuna getir
-        this.flapsPosition = 0.33;
-        
-        if (this.effects && this.effects.showMessage) {
-            this.effects.showMessage('Kalkış başladı! Hızlanmak için W tuşuna basın.', 'info');
-        }
-        
-        console.log('Takeoff procedure started');
-    }
-    
-    /**
-     * İniş prosedürünü başlat
-     */
-    startLanding() {
-        if (this.isOnGround || this.isLanding) {
-            return;
-        }
-        
-        console.log('Starting landing procedure...');
-        
-        // İniş için gerekli kontrolleri yap
-        if (!this.landingGear) {
-            console.log('Cannot land: Landing gear not deployed');
-            if (this.effects && this.effects.showMessage) {
-                this.effects.showMessage('İniş takımları açık değil! G tuşuna basın.', 'warning');
-            }
-            return;
-        }
-        
-        // İniş modunu aktifleştir
-        this.isLanding = true;
-        
-        // Flapları iniş pozisyonuna getir
-        this.flapsPosition = 0.66;
-        
-        if (this.effects && this.effects.showMessage) {
-            this.effects.showMessage('İniş başladı! Piste yaklaşın ve yavaşça alçalın.', 'info');
-        }
-        
-        console.log('Landing procedure started');
-    }
-    
-    /**
-     * Uçağı piste yerleştir
-     */
-    placeOnRunway() {
-        if (!this.world || !this.world.objects.runway) {
-            console.warn('Cannot place on runway: World or runway not available');
-            return;
-        }
-        
-        // Pistin pozisyonunu al
-        const runway = this.world.objects.runway;
-        const runwayPos = runway.position.clone();
-        
-        // Uçağı pistin başlangıcına yerleştir
-        const position = new THREE.Vector3(
-            runwayPos.x,
-            GameConstants.WORLD.GROUND_HEIGHT + 1,
-            runwayPos.z - (this.world.runwayLength / 2) + 20
-        );
-        
-        // Uçağın yönünü pist doğrultusunda ayarla
-        const quaternion = new THREE.Quaternion();
-        quaternion.setFromAxisAngle(new THREE.Vector3(0, 1, 0), Math.PI / 2);
-        
-        // Pozisyonu ve rotasyonu ayarla
-        this.setPosition(position);
-        this.setRotation(quaternion);
-        
-        // Fizik gövdesini güncelle
-        if (this.body) {
-            this.body.position.copy(position);
-            this.body.quaternion.copy(quaternion);
-            this.body.velocity.set(0, 0, 0);
-            this.body.angularVelocity.set(0, 0, 0);
-        }
-        
-        // Uçak durumunu güncelle
-        this.isOnGround = true;
-        this.isTakingOff = false;
-        this.isLanding = false;
-        this.speed = 0;
-        this.verticalSpeed = 0;
-        
-        // İniş takımlarını aç
-        this.landingGear = true;
-        
-        console.log('Aircraft placed on runway');
+    addTeamLight() {
+        // Takım rengi ışığı - performans optimizasyonu için basit
+        const lightColor = this.team === 'blue' ? 0x0000ff : 0xff0000;
+        const light = new THREE.PointLight(lightColor, 0.5, 10);
+        light.position.set(0, 0, 0);
+        this.mesh.add(light);
     }
     
     /**

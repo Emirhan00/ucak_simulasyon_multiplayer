@@ -100,6 +100,32 @@
                     <p id="login-status" class="status-message"></p>
                 </form>
             </div>
+            
+            <!-- Performans ayarları butonu -->
+            <div id="performance-settings">
+                <button id="show-perf-settings" class="settings-button">Performans Ayarları</button>
+                <div id="perf-settings-panel" class="settings-panel" style="display:none;">
+                    <h3>Grafik Kalitesi</h3>
+                    <div class="quality-buttons">
+                        <button class="quality-btn" data-quality="low">Düşük</button>
+                        <button class="quality-btn" data-quality="medium">Orta</button>
+                        <button class="quality-btn" data-quality="high">Yüksek</button>
+                        <button class="quality-btn" data-quality="ultra">Ultra</button>
+                    </div>
+                    <div class="settings-option">
+                        <label>
+                            <input type="checkbox" id="show-fps" checked>
+                            FPS Göster
+                        </label>
+                    </div>
+                    <div class="settings-option">
+                        <label>
+                            <input type="checkbox" id="auto-adapt" checked>
+                            Otomatik Optimizasyon
+                        </label>
+                    </div>
+                </div>
+            </div>
         </div>
         
         <!-- Lobby Screen -->
@@ -188,5 +214,136 @@
     
     <!-- Game Scripts -->
     <script type="module" src="main.js"></script>
+    
+    <style>
+        /* Mevcut stiller */
+        /* ... existing code ... */
+        
+        /* Performans ayarları için stiller */
+        #performance-settings {
+            position: absolute;
+            bottom: 20px;
+            right: 20px;
+        }
+        
+        .settings-button {
+            background-color: #444;
+            color: white;
+            border: none;
+            padding: 8px 15px;
+            border-radius: 4px;
+            cursor: pointer;
+            transition: background-color 0.3s;
+        }
+        
+        .settings-button:hover {
+            background-color: #555;
+        }
+        
+        .settings-panel {
+            position: absolute;
+            bottom: 50px;
+            right: 0;
+            background-color: rgba(0, 0, 0, 0.8);
+            border-radius: 6px;
+            padding: 15px;
+            width: 250px;
+            color: white;
+            z-index: 100;
+        }
+        
+        .quality-buttons {
+            display: flex;
+            justify-content: space-between;
+            margin-bottom: 15px;
+        }
+        
+        .quality-btn {
+            background-color: #555;
+            color: white;
+            border: none;
+            padding: 6px 10px;
+            border-radius: 4px;
+            cursor: pointer;
+            transition: background-color 0.3s;
+        }
+        
+        .quality-btn.active {
+            background-color: #3498db;
+        }
+        
+        .quality-btn:hover {
+            background-color: #666;
+        }
+        
+        .settings-option {
+            margin: 10px 0;
+        }
+    </style>
+    
+    <script>
+        // Mevcut JavaScript kodları
+        /* ... existing code ... */
+        
+        // Performans ayarları için kodlar
+        document.addEventListener('DOMContentLoaded', function() {
+            const showSettingsBtn = document.getElementById('show-perf-settings');
+            const settingsPanel = document.getElementById('perf-settings-panel');
+            const qualityBtns = document.querySelectorAll('.quality-btn');
+            const showFpsCheckbox = document.getElementById('show-fps');
+            const autoAdaptCheckbox = document.getElementById('auto-adapt');
+            
+            // Panel göster/gizle
+            showSettingsBtn.addEventListener('click', function() {
+                settingsPanel.style.display = settingsPanel.style.display === 'none' ? 'block' : 'none';
+            });
+            
+            // Kalite butonları
+            qualityBtns.forEach(btn => {
+                btn.addEventListener('click', function() {
+                    const quality = this.dataset.quality;
+                    
+                    // Aktif butonu güncelle
+                    qualityBtns.forEach(b => b.classList.remove('active'));
+                    this.classList.add('active');
+                    
+                    // Oyun varsa kaliteyi değiştir
+                    if (window.game && window.game.performanceManager) {
+                        window.game.performanceManager.changeQuality(quality);
+                        console.log(`Kalite değiştirildi: ${quality}`);
+                    }
+                });
+            });
+            
+            // FPS göster/gizle
+            showFpsCheckbox.addEventListener('change', function() {
+                if (window.game && window.game.performanceManager) {
+                    window.game.performanceManager.togglePerformanceDisplay(this.checked);
+                    console.log(`FPS gösterimi: ${this.checked ? 'açıldı' : 'kapatıldı'}`);
+                }
+            });
+            
+            // Otomatik adaptasyon
+            autoAdaptCheckbox.addEventListener('change', function() {
+                if (window.game && window.game.performanceManager) {
+                    window.game.performanceManager.isAutoAdaptEnabled = this.checked;
+                    console.log(`Otomatik optimizasyon: ${this.checked ? 'açıldı' : 'kapatıldı'}`);
+                }
+            });
+            
+            // Sayfa yüklendiğinde varsayılan kaliteyi seç
+            function setDefaultQuality() {
+                // Varsayılan orta kalite
+                const defaultQuality = 'medium';
+                const defaultBtn = document.querySelector(`.quality-btn[data-quality="${defaultQuality}"]`);
+                
+                if (defaultBtn) {
+                    defaultBtn.classList.add('active');
+                }
+            }
+            
+            setDefaultQuality();
+        });
+    </script>
 </body>
 </html> 

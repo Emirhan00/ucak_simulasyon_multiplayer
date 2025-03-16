@@ -18,10 +18,12 @@ import { ChatSystem } from './src/classes/ChatSystem.js';
 import { Player } from './src/classes/Player.js';
 import { Enemy } from './src/classes/Enemy.js';
 import { Projectile } from './src/classes/Projectile.js';
+import { PerformanceManager } from './src/performance/PerformanceManager.js';
 
 // Global değişkenler
 let scene, camera, renderer, stats;
 let world, aircraft, controls, physics, ui, mission, effects, networkManager;
+let performanceManager; // PerformanceManager global tanımı
 let clock, delta;
 let isGameActive = false; // Tek bir değişken kullanıyoruz - isGameRunning değil
 let currentPlayer = null;
@@ -367,6 +369,25 @@ function setupGameComponents() {
         isGameActive = false;
         window.isGameActive = false;
         
+        // Kamera referansını World'e gönder
+        world.setCamera(camera);
+        
+        // Performance Manager oluştur
+        performanceManager = new PerformanceManager({
+            scene: scene,
+            renderer: renderer,
+            physics: physics,
+            world: world,
+            camera: camera,
+            ui: ui
+        });
+        performanceManager.init();
+        
+        // Global erişim için performanceManager'ı window nesnesine ekle
+        window.game = {
+            performanceManager: performanceManager
+        };
+        
         console.log('Game components setup complete');
     } catch (error) {
         console.error('Error setting up game components:', error);
@@ -550,6 +571,11 @@ function animate() {
         
         // Effects güncelle
         if (effects) effects.update(deltaTime);
+        
+        // Performance manager'ı güncelle
+        if (performanceManager) {
+            performanceManager.update(deltaTime);
+        }
         
         // Render
         renderer.render(scene, camera);

@@ -329,6 +329,19 @@ function setupGameComponents() {
         });
         localPlayer.setAircraft(aircraft);
         
+        // Uçak oluşturuldu mu kontrol et
+        console.log('Aircraft created:', aircraft);
+        console.log('Aircraft mesh:', aircraft.mesh);
+        if (aircraft.mesh) {
+            console.log('Aircraft mesh visible:', aircraft.mesh.visible);
+            // Mesh görünürlüğünü zorla
+            aircraft.mesh.visible = true;
+        }
+        
+        // Kamera başlangıç ayarı
+        cameraView = 'follow';
+        updateCamera(); // İlk kamera pozisyonunu hemen ayarla
+        
         // Enemy AI uçaklar (test için)
         enemies = [];
         for (let i = 0; i < 3; i++) {
@@ -358,12 +371,6 @@ function setupGameComponents() {
         // UI için oyuncu bilgilerini ayarla
         ui.updatePlayerName('You');
         ui.updatePlayerCount(1);
-        
-        // Kamerayı uçağa bağla
-        camera.position.set(0, 10, -20);
-        
-        // İlk kamera görünümü
-        cameraView = 'follow';
         
         // Oyun henüz aktif değil - login sonrası aktifleşecek
         isGameActive = false;
@@ -478,7 +485,7 @@ function handleLoginButtonClick() {
             isGameActive = true;
             window.isGameActive = true;
             
-            // Oyuncu adını ayarla
+            // Oyuncu adını UI'da göster
             if (ui && ui.updatePlayerName) {
                 ui.updatePlayerName(username);
             }
@@ -544,9 +551,21 @@ function animate() {
         if (localPlayer) {
             localPlayer.update(deltaTime);
             
-            // Kamera pozisyonu
-            if (cameraView === 'follow' && aircraft && aircraft.mesh) {
-                updateCamera();
+            // Uçağı güncelle
+            if (aircraft) {
+                aircraft.update(deltaTime);
+                
+                // Her zaman kamera güncellemesini yap
+                if (aircraft.mesh) {
+                    // Kamera güncellemesini zorla
+                    const pos = aircraft.getPosition();
+                    const offset = new THREE.Vector3(0, 10, -30);
+                    camera.position.copy(pos).add(offset);
+                    camera.lookAt(pos);
+                    
+                    // Debug için uçak pozisyonunu görüntüle
+                    console.log('Aircraft at y:', pos.y.toFixed(2), '| Camera at y:', camera.position.y.toFixed(2));
+                }
             }
             
             // Ateş etme
@@ -621,7 +640,8 @@ function handleFire() {
             team: 'blue',
             color: 0x0088ff,
             createTrail: true,
-            addLight: true
+            addLight: true,
+            radius: 0.2
         });
         
         projectiles.push(projectile);
@@ -729,11 +749,23 @@ function toggleCameraView() {
 }
 
 function updateCamera() {
-    if (!aircraft || !aircraft.mesh) return;
+    if (!aircraft || !aircraft.mesh) {
+        console.error('Aircraft or aircraft mesh is not available for camera update');
+        return;
+    }
     
     const position = aircraft.getPosition();
-    const rotation = aircraft.getRotation();
     const quaternion = aircraft.getQuaternion();
+    
+    // Debug uçak pozisyonu
+    console.log('Camera updating to follow aircraft at position:', 
+        'x:', position.x.toFixed(2), 
+        'y:', position.y.toFixed(2), 
+        'z:', position.z.toFixed(2)
+    );
+    
+    // Uçak mesh'ini görünür yap
+    aircraft.mesh.visible = true;
     
     switch (cameraView) {
         case 'cockpit':
@@ -745,10 +777,13 @@ function updateCamera() {
             break;
             
         case 'follow':
-            // Takip kamerası
-            const followOffset = new THREE.Vector3(0, 5, -15);
-            const followWorldOffset = followOffset.clone().applyQuaternion(quaternion);
-            camera.position.copy(position).add(followWorldOffset);
+            // Takip kamerası - sert kodlanmış offset
+            const followOffset = new THREE.Vector3(0, 10, -30);
+            
+            // Kamerayı uçağın arkasına konumlandır (sınırlama olmadan)
+            camera.position.copy(position).add(followOffset);
+            
+            // Kamerayı uçağa yönelt
             camera.lookAt(position);
             break;
             
@@ -832,6 +867,12 @@ function handleLoginSuccess(userData) {
         console.log('Activating game');
         isGameActive = true;
         window.isGameActive = true;
+        
+        // Kamera pozisyonunu güncelle
+        if (aircraft && aircraft.mesh) {
+            console.log('Updating camera position after login');
+            updateCamera();
+        }
         
         console.log('Game activated successfully after login');
         

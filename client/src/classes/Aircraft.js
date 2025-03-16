@@ -221,6 +221,9 @@ export class Aircraft {
             // Sahneye ekle
             this.scene.add(this.mesh);
             
+            // Mesh'in görünür olduğundan emin ol
+            this.mesh.visible = true;
+            
             // Motor ve egzoz efektleri
             if (this.effects && !this.isRemote) {
                 this.engineSystem.createEngineEffects(this.effects);
@@ -861,6 +864,72 @@ export class Aircraft {
             }
         } catch (error) {
             console.error('Error in applyAerodynamics:', error);
+        }
+    }
+    
+    /**
+     * Uçağı güncelle - Fizik ve görsel güncelleme
+     * @param {number} deltaTime - Geçen süre (saniye)
+     */
+    update(deltaTime) {
+        try {
+            // Eğer uçak ölüyse güncelleme yapma
+            if (!this.alive) {
+                return;
+            }
+            
+            // Fizik gövdesi yoksa güncelleme yapma
+            if (!this.body) {
+                return;
+            }
+            
+            // Uçağın fizik gövdesinden pozisyon ve rotasyon bilgilerini al
+            this.position.set(
+                this.body.position.x,
+                this.body.position.y,
+                this.body.position.z
+            );
+            
+            this.quaternion.set(
+                this.body.quaternion.x,
+                this.body.quaternion.y,
+                this.body.quaternion.z,
+                this.body.quaternion.w
+            );
+            
+            // Euler açılarını quaternion'dan hesapla
+            this.rotation.setFromQuaternion(this.quaternion);
+            
+            // Mesh varsa pozisyon ve rotasyonu güncelle
+            if (this.mesh) {
+                this.mesh.position.copy(this.position);
+                this.mesh.quaternion.copy(this.quaternion);
+            }
+            
+            // Yerçekimine karşı kaldırma kuvveti uygula
+            // Bu, uçağın düşmesini engelleyecek
+            if (this.body) {
+                // Yerçekimi kuvvetini dengele - tam dengelemek yerine hafif bir kaldırma kuvveti uygula
+                const gravity = new CANNON.Vec3(0, -9.82, 0); // Yerçekimi vektörü
+                const antiGravity = gravity.scale(-0.95); // Yerçekiminin %95'ini dengele, böylece uçak sabit kalır
+                
+                // Uçağa kaldırma kuvveti uygula
+                this.body.applyForce(antiGravity.scale(this.mass), this.body.position);
+                
+                // Hız sınırlaması uygula
+                if (this.body.position.y > 300) {
+                    // 300 birim yüksekliğin üzerine çıkmasını önle
+                    this.body.position.y = 300;
+                    this.body.velocity.y = Math.min(0, this.body.velocity.y);
+                }
+            }
+            
+            // Motor sistemini güncelle
+            if (this.engineSystem) {
+                this.engineSystem.update(deltaTime, this.inputs);
+            }
+        } catch (error) {
+            console.error('Error updating aircraft:', error);
         }
     }
 } 
